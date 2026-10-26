@@ -12,6 +12,7 @@ from openai import OpenAI
 from agent import ask_agent
 from source_analysis import analyze_sources, format_source_analysis_markdown
 from batch_analysis import analyze_batch_history, format_batch_analysis_markdown
+from overall_program_analysis import build_overall_program_analysis, format_overall_program_fallback
 
 from analysis_engine import (
     apply_source_filter,
@@ -4511,78 +4512,14 @@ def render_ai_diagnosis(
 
 @st.cache_data
 def load_primary_data():
-    """Load and normalize Version 2's Program Batch Data source."""
+    """Load the unified dataset used by the overall analysis tool."""
     data_path = APP_DIR / "data" / "Program Batch Data.csv"
     if not data_path.exists():
         raise FileNotFoundError(
-            f"Program Batch Data source not found: {data_path}. "
-            "Place Program Batch Data.csv inside the data/ folder."
+            f"Unified data source not found: {data_path}. "
+            "Place Batch_wise_program_data.csv inside the data/ folder."
         )
-    df = pd.read_csv(data_path, low_memory=False)
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # Normalize known schema differences without fabricating actual outcomes.
-    aliases = {
-        "total_program_fees_sf": "total_program_fees",
-        "program_fee": "total_program_fees",
-        "source": "source_created",
-    }
-    for source_col, target_col in aliases.items():
-        if target_col not in df.columns and source_col in df.columns:
-            df[target_col] = df[source_col]
-
-    # The existing analysis modules support a broader schema. Missing fields are
-    # explicitly unavailable (NaN); planned GSV is never copied into actual GSV.
-    expected_optional = [
-        "gsv_cr", "paid_leads", "paid_enrollments", "paid_gsv_cr", "paid_spends",
-        "planned_paid_leads", "planned_paid_enrollments", "planned_paid_gsv", "planned_paid_spends",
-        "previous_batch_leads", "previous_batch_warm_leads", "previous_batch_applications",
-        "previous_batch_enrollments", "previous_batch_gsv_cr", "previous_batch_spends",
-        "previous_batch_Planned_Budget", "previous_batch_Planned_Lead",
-        "previous_batch_Planned_Application", "previous_batch_Planned_Enrollment",
-        "previous_batch_Planned_GSV", "previous_batch_paid_leads", "previous_batch_paid_enrollments",
-        "previous_batch_paid_gsv_cr", "previous_batch_paid_spends",
-        "previous_batch_planned_paid_leads", "previous_batch_planned_paid_enrollments",
-        "previous_batch_planned_paid_gsv", "previous_batch_planned_paid_spends",
-    ]
-    for col in expected_optional:
-        if col not in df.columns:
-            df[col] = pd.NA
-
-    numeric_columns = [
-        "leads", "warm_leads", "applications", "enrollments", "spends",
-        "total_program_fees", "application_fees_c", "Planned_Budget", "Planned_Lead",
-        "Planned_Application", "Planned_Enrollment", "Planned_GSV", "gsv_cr",
-    ]
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    if "sales_start_date" in df.columns:
-        df["sales_start_date"] = pd.to_datetime(df["sales_start_date"], errors="coerce", dayfirst=True)
-    for col in ["program_code", "previous_batch_code", "category", "financial_year", "program_status_f", "source_created", "tech_management", "New_Repeat"]:
-        if col in df.columns:
-            df[col] = df[col].astype("string").str.strip()
-    return df
-
-
-@st.cache_data
-def load_advisor_mix_data():
-    """Load the advisor-tenure table separately; never join it onto source rows."""
-    data_path = APP_DIR / "data" / "Advisor Mix.csv"
-    if not data_path.exists():
-        return pd.DataFrame(columns=["program_code", "opp_agent_tenure_mth", "leads", "apps", "enrols", "warm"])
-    df = pd.read_csv(data_path, low_memory=False)
-    df.columns = [str(c).strip() for c in df.columns]
-    aliases = {"apps": "applications", "enrols": "enrollments", "warm": "warm_leads"}
-    for source_col, target_col in aliases.items():
-        if target_col not in df.columns and source_col in df.columns:
-            df[target_col] = df[source_col]
-    for col in ["leads", "applications", "enrollments", "warm_leads"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    if "program_code" in df.columns:
-        df["program_code"] = df["program_code"].astype("string").str.strip()
-    return df
+    return pd.read_csv(data_path, low_memory=False)
 
 
 try:
@@ -4598,10 +4535,22 @@ except Exception as exc:
     st.stop()
 
 
-# Program Batch Data is the primary source. Advisor Mix remains separate because
-# its grain is advisor tenure rather than acquisition source.
+# The old Program Check Tool CSV has been retired. Keep this alias for
+# backward-compatible calls in the existing UI helpers; it points to the
+# same unified dataset, not a second data source.
+
 check_df = raw_df
-advisor_mix_df = load_advisor_mix_data()
+
+
+@st.cache_data
+def load_advisor_mix():
+    advisor_path = APP_DIR / "data" / "Advisor Mix.csv"
+    if not advisor_path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(advisor_path, low_memory=False)
+
+
+advisor_df = load_advisor_mix()
 
 
 # =========================================================
@@ -5071,7 +5020,7 @@ old_batch_code = old_batch_codes[0] if old_batch_codes else None
 )
 def show_data_preview():
 
-    st.caption("Unified source: data/Batch_wise_program_data.csv")
+    st.caption("Unified source: data/Program Batch Data.csv")
     st.dataframe(
         df,
         width="stretch",
@@ -5087,7 +5036,7 @@ def show_data_preview():
 analysis_options = [
     "Source analysis",
     "Batch Analysis",
-    "Overall program analysis (coming soon)",
+    "Overall program analysis",
     "Category analysis (coming soon)",
     "Paid performance analysis (coming soon)",
     "Funnel diagnostics (coming soon)",
@@ -5098,7 +5047,7 @@ analysis_type = st.selectbox(
     options=analysis_options,
     index=0,
     key="analysis_type_selector",
-    help="Choose an analysis. Source analysis and Batch Analysis are connected; other analysis types are planned next.",
+    help="Choose an analysis. Source analysis, Batch Analysis, and Overall program analysis are available.",
 )
 
 
@@ -5150,16 +5099,104 @@ if preview_clicked:
 
 if run_analysis:
 
-    if analysis_type not in {"Source analysis", "Batch Analysis"}:
+    if analysis_type not in {"Source analysis", "Batch Analysis", "Overall program analysis"}:
 
         st.info(
             f"{analysis_type} is planned but not connected yet. "
-            "Source analysis and Batch Analysis are available now."
+            "Source analysis, Batch Analysis, and Overall program analysis are available now."
         )
 
     elif not program_code:
 
         st.warning("Please select a New Batch first.")
+
+    elif analysis_type == "Overall program analysis":
+
+        with st.spinner("Evaluating plan attainment, the last two available batches, source performance, and advisor-tenure mix..."):
+            try:
+                overall_result = build_overall_program_analysis(
+                    raw_df=raw_df,
+                    program_code=program_code,
+                    advisor_df=advisor_df,
+                )
+                if overall_result.get("error"):
+                    st.error(overall_result["error"])
+                    st.stop()
+
+                overall_payload = json.dumps(
+                    overall_result,
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                )
+                overall_prompt = f"""
+ROLE: Senior Marketing Performance and Growth Analytics Consultant.
+
+TASK:
+Write an executive-ready Overall Program Analysis for {program_code}. Use ONLY the deterministic evidence in the JSON package below.
+
+REQUIRED REPORT STRUCTURE:
+1. Executive diagnosis — clearly state whether the program is doing good/bad, did well/did not do well. Compare planned vs actual and the previous two available batches. Apply this decision rule: if current performance is better than at least one of the previous two available batches, call that out as a positive signal, but do not ignore plan misses, weak funnel conversion, price changes, or major negative metrics.
+2. Why it performed well or poorly — quantified drivers and whether they relate to lead volume, warm-lead quality, conversion, enrollments, observed spend, plan attainment, or program fee/price point.
+3. Summary of the reason — concise 3–4 line conclusion.
+4. Batch-wise comparison — current vs previous and previous-to-previous batch. Include planned vs actual for available fields and all available metric comparisons.
+5. Metric scorecard — leads, warm leads, applications, enrollments, L2W, L2A, L2E, W2A, A2E, CPL and CAC. Show values in a Markdown table; use N/A for unavailable data.
+6. Source-wise performance and root cause — provide a concise 3–4 line summary plus a Markdown table. Identify best and weakest sources using volume, conversion, spend evidence and downstream outcomes. When lead volume is not the issue but L2A has declined, explicitly inspect L2W and W2A to locate where the funnel is weakening. Do not call a source good/bad on conversion alone without considering volume.
+7. Advisor-tenure mix (only if advisor data is present) — compare the tenure groups for the current and historical batches where available. Explain which mix has stronger conversion, but do not claim causal impact.
+8. Prioritized actions — specific actions grounded in evidence, no invented targets.
+
+ANALYTICAL RULES:
+- Use source metrics from the JSON as authoritative; do not invent or recalculate missing values.
+- Treat missing values as N/A, never as zero.
+- Check price point (program fee) when explaining GCV or enrollment differences; fee is program-level and repeated across source rows, not summed.
+- The source file contains Planned_GSV but no actual GSV field. Do not present Planned_GSV as actual GSV, and do not infer actual GSV unless the source supports it.
+- Spend is observed only on rows with spend values; call it observed spend and note incomplete coverage if appropriate.
+- L2W = warm leads/leads; L2A = applications/leads; L2E = enrollments/leads; W2A = applications/warm leads; A2E = enrollments/applications. Show percentages and use percentage-point differences when comparing rates.
+- CPL and CAC use observed spend and must be caveated when spend coverage is incomplete.
+- For sources with sufficient lead volume but reduced L2A, diagnose whether the drop is at L2W, W2A, or both. Separate observed facts from hypotheses.
+- Compare the current batch to the previous and previous-to-previous available batches. If references are missing from the dataset, explicitly state this; do not fabricate history.
+- Use only valid Markdown tables. Be concise, commercial, and evidence-based. Do not claim causation from observational data.
+
+DETERMINISTIC ANALYSIS JSON:
+{overall_payload}
+""".strip()
+
+                try:
+                    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+                    model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
+                    response = client.responses.create(
+                        model=model,
+                        instructions=(
+                            "You are a senior marketing analytics consultant. Follow the requested report "
+                            "structure exactly. Return complete Markdown with numbered headings and valid Markdown "
+                            "tables. Never invent metrics, history, or causes. Use N/A when evidence is unavailable."
+                        ),
+                        input=overall_prompt,
+                        max_output_tokens=8500,
+                    )
+                    answer = (response.output_text or "").strip()
+                except Exception:
+                    # Deterministic fallback keeps this analysis useful if AI is unavailable.
+                    answer = format_overall_program_fallback(overall_result)
+
+                st.session_state.analysis_report = {
+                    "found": True,
+                    "analysis_type": "Overall program analysis",
+                    "program_code": program_code,
+                    "compared_batches": [
+                        x.get("program_code") for x in overall_result.get("batches", [])
+                    ],
+                }
+                st.session_state.analysis_text = answer or format_overall_program_fallback(overall_result)
+
+            except Exception as exc:
+                st.session_state.analysis_report = {
+                    "found": False,
+                    "analysis_type": "Overall program analysis",
+                    "message": str(exc),
+                }
+                st.session_state.analysis_text = None
+                st.error(f"Overall program analysis failed: {exc}")
 
     elif analysis_type == "Batch Analysis":
 
@@ -5446,7 +5483,7 @@ DETERMINISTIC SOURCE-ANALYSIS PACKAGE:
 # PERFORMANCE CARDS
 # =========================================================
 
-if program_code and analysis_type not in {"Source analysis", "Batch Analysis"}:
+if program_code and analysis_type not in {"Source analysis", "Batch Analysis", "Overall program analysis"}:
 
     performance = get_check_tool_performance(
         check_df,

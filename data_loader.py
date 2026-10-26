@@ -11,7 +11,7 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
-BATCH_DATA_FILE = DATA_DIR / "Program Batch Data.csv"
+BATCH_DATA_FILE = DATA_DIR / "Batch_wise_program_data.csv"
 
 
 # ============================================================
@@ -27,7 +27,6 @@ EXPECTED_COLUMNS = [
     "financial_year",
     "program_status_f",
     "total_program_fees",
-    "total_program_fees_sf",
     "source_created",
     "New_Repeat",
     "leads",
@@ -139,11 +138,6 @@ def clean_batch_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # Standardize column names
     df.columns = [str(col).strip() for col in df.columns]
-
-    # Normalize Version 2 source aliases when present. Actual GSV is intentionally
-    # not inferred from Planned_GSV.
-    if "total_program_fees" not in df.columns and "total_program_fees_sf" in df.columns:
-        df["total_program_fees"] = df["total_program_fees_sf"]
 
     # Convert numeric columns
     for column in NUMERIC_COLUMNS:
