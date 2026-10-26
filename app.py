@@ -4224,6 +4224,8 @@ def markdown_to_html(content):
 
     def inline_format(value):
         safe = html.escape(str(value), quote=True)
+        safe = safe.replace("[[UP]]", "<span style=\"color:#22c55e;font-weight:800;\">↑</span>")
+        safe = safe.replace("[[DOWN]]", "<span style=\"color:#ef4444;font-weight:800;\">↓</span>")
         safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
         safe = re.sub(r"`([^`]+)`", r"<code>\1</code>", safe)
         safe = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", safe)
@@ -5123,43 +5125,26 @@ if run_analysis:
                     st.error(overall_result["error"])
                     st.stop()
 
+                # Compact JSON reduces prompt size and latency without changing the evidence.
                 overall_payload = json.dumps(
                     overall_result,
                     ensure_ascii=False,
-                    indent=2,
+                    separators=(",", ":"),
                     default=str,
                 )
-                overall_prompt = f"""
-ROLE: Senior Marketing Performance and Growth Analytics Consultant.
+                overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
 
-TASK:
-Write an executive-ready Overall Program Analysis for {program_code}. Use ONLY the deterministic evidence in the JSON package below.
+REQUIRED OUTPUT:
+1. Executive diagnosis at the top: 1 short paragraph (2 sentences max) saying good/poor/mixed based on plan and history, followed by 3–5 concise reason bullets. No separate lengthy “Why it performed well or poorly” section.
+2. Plan / Actual table: plan and actual for leads, applications, enrollments, observed spend/budget, Actual GSV, Planned GSV, GSV variance and attainment where available.
+3. One heading “Current vs previous batch”, with subsections “3.1 Volume and commercial outcomes” (leads, warm leads, applications, enrollments, fee, Actual GSV) and “3.2 Conversion and acquisition efficiency” (L2W, L2A, L2E, W2A, A2E, CPL, CAC). Include both prior batches when available. Change columns show percentage only, or percentage points for rates. Color arrows only: [[UP]] for green ↑ and [[DOWN]] for red ↓; no circles/dots. Interpret direction by metric meaning (higher conversions/volume/GSV positive; higher CPL/CAC negative; fee neutral). Keep absolute values only in batch-value columns.
+4. Source-wise performance: 3–4 lines plus table; identify stronger/weaker sources using volume, funnel conversions and observed spend. If L2A drops, inspect L2W and W2A. Distinguish facts from hypotheses.
+5. Advisor-tenure mix only if present: prioritize tenure groups by equal-weight (L2W + L2E) / 2 when both exist. State this is association, not causation.
+6. Prioritized evidence-based actions.
 
-REQUIRED REPORT STRUCTURE:
-1. Executive diagnosis at the very top: start with ONE short paragraph (2–3 sentences maximum) explicitly saying whether the program is performing well or poorly, based on plan and historical performance. Immediately follow with 3–5 concise reason bullets synthesizing the most important drivers. This section combines the former Executive Diagnosis and Summary of the reason. Do not repeat a long, detailed diagnosis.
-2. Planned versus actual — heading must be exactly "Plan / Actual" (not "Plan / Attainment"). Include plan and actual columns, including manually calculated Actual GSV, Planned GSV, GSV variance and GSV plan attainment where available.
-3. Current vs previous batch — use this exact top-level heading once. Under it, create subsection 3.1 Volume and commercial outcomes (Leads, Warm leads, Applications, Enrollments, Program fee, Actual GSV) and subsection 3.2 Conversion and acquisition efficiency (L2W, L2A, L2E, W2A, A2E, CPL, CAC). Compare the current batch with both available prior batches. For every "Change vs [batch]" cell, show ONLY the percentage change (or pp change for conversion rates), never absolute value plus percentage.
-4. Funnel and efficiency metrics — include leads, warm leads, applications, enrollments, L2W, L2A, L2E, W2A, A2E, CPL and CAC in relevant tables, without a separate section titled "Metric scorecard" and without duplicating the same figures in a standalone scorecard.
-5. Source-wise performance and root cause — concise 3–4 line summary plus a table. Identify best and weakest sources using volume, conversion, spend evidence and downstream outcomes. When lead volume is not the issue but L2A has declined, inspect L2W and W2A to locate the funnel weakness. Do not call a source good/bad on conversion alone without considering volume.
-6. Advisor-tenure mix (only if advisor data is present) — rank tenure groups with priority given to L2W and L2E. The best-tenure calculation should use an equal-weight priority score: (L2W + L2E) / 2, where both rates are available. Explain that this is an observed association, not proof of causal impact.
-7. Prioritized actions — specific actions grounded in evidence, no invented targets.
+RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; clearly label conversion. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; use percentage-point changes. Do not add a Metric Scorecard or standalone long “Why” section. Use valid Markdown tables and concise wording.
 
-ANALYTICAL RULES:
-- Use source metrics from the JSON as authoritative; do not invent or recalculate missing values.
-- Treat missing values as N/A, never as zero.
-- Check price point (program fee) when explaining GCV or enrollment differences; fee is program-level and repeated across source rows, not summed.
-- Calculate Actual GSV manually as total enrollments × the program-level total_program_fees_sf. The fee is repeated across source rows, so take it once and never sum it. In this dataset Planned_GSV values are expressed in crore units; convert them to rupees (× 10,000,000) before comparing against calculated Actual GSV. Label this unit conversion clearly.
-- Spend is observed only on rows with spend values; call it observed spend and note incomplete coverage if appropriate.
-- L2W = warm leads/leads; L2A = applications/leads; L2E = enrollments/leads; W2A = applications/warm leads; A2E = enrollments/applications. Show percentages and use percentage-point differences when comparing rates.
-- CPL and CAC use observed spend and must be caveated when spend coverage is incomplete.
-- For sources with sufficient lead volume but reduced L2A, diagnose whether the drop is at L2W, W2A, or both. Separate observed facts from hypotheses.
-- Compare the current batch to the previous and previous-to-previous available batches. If references are missing from the dataset, explicitly state this; do not fabricate history.
-- Do not create a separate "Metric scorecard" section. Do not add a long standalone "Why it performed well or poorly" bullet section; its concise key reasons belong in the opening Executive diagnosis. Detailed metrics can remain in the relevant tables later.
-- For the comparison tables, columns like "Change vs PCPF_09" and "Change vs PCPF_08" must contain percentages only (pp for rate changes), never an absolute value alongside the percentage. Use color-coded direction markers in current and change cells: 🟢 ↑ for positive movement and 🔴 ↓ for negative movement. Interpret positivity by metric meaning, not raw direction: more leads/warm leads/apps/enrollments/conversion/GSV is positive; higher CPL/CAC is negative; program fee movement is neutral unless contextual evidence supports a judgment. Keep N/A unmarked. Add a concise legend. Use the exact heading "Current vs previous batch" once, followed by "3.1 Volume and commercial outcomes" and "3.2 Conversion and acquisition efficiency"; do not create separate top-level cards/headings for those two subsections.
-- Use "Plan / Actual" as the planned-versus-actual table heading/column framing; do not use "Plan / Attainment" as the heading.
-- Use only valid Markdown tables. Be concise, commercial, and evidence-based. Do not claim causation from observational data.
-
-DETERMINISTIC ANALYSIS JSON:
+EVIDENCE JSON:
 {overall_payload}
 """.strip()
 
@@ -5174,7 +5159,8 @@ DETERMINISTIC ANALYSIS JSON:
                             "tables. Never invent metrics, history, or causes. Use N/A when evidence is unavailable."
                         ),
                         input=overall_prompt,
-                        max_output_tokens=8500,
+                        max_output_tokens=4500,
+                        reasoning={"effort": "low"},
                     )
                     answer = (response.output_text or "").strip()
                 except Exception:

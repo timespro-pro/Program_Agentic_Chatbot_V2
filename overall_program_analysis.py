@@ -234,7 +234,7 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
     prior_batches = result["batches"][1:3]
     prev1 = prior_batches[0]["program_code"] if prior_batches else "Previous batch"
     prev2 = prior_batches[1]["program_code"] if len(prior_batches) > 1 else "Previous-to-previous"
-    lines += ["## 3. Current vs previous batch", "Legend: 🟢 ↑ positive movement · 🔴 ↓ negative movement. Conversion-rate changes are percentage points; other changes are percentages.",
+    lines += ["## 3. Current vs previous batch", "Legend: green ↑ = positive movement · red ↓ = negative movement. Conversion-rate changes are percentage points; other changes are percentages.",
               "### 3.1 Volume and commercial outcomes",
               f"| Metric | Current batch | Change vs {prev1} | {prev1} | Change vs {prev2} | {prev2} |",
               "|---|---:|---:|---:|---:|---:|"]
@@ -244,7 +244,7 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
         if change_value is None or key == "program_fee": return ""
         # Positive means commercially better, not merely numerically higher.
         favorable = change_value < 0 if key in {"CPL", "CAC"} else change_value > 0
-        return ("🟢 ↑ " if favorable else "🔴 ↓ ") if change_value != 0 else ""
+        return ("[[UP]] " if favorable else "[[DOWN]] ") if change_value != 0 else ""
     for label, key, favorable_higher in volume_keys:
         cells = [label, fmt(m.get(key))]
         for old in prior_batches:
