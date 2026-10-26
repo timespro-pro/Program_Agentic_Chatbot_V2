@@ -13,7 +13,7 @@ from agent import ask_agent
 from source_analysis import analyze_sources, format_source_analysis_markdown
 from batch_analysis import analyze_batch_history, format_batch_analysis_markdown
 from overall_program_analysis import build_overall_program_analysis, format_overall_program_fallback
-from analysis_cache import make_cache_key, get_cached_report, put_cached_report, get_cache_diagnostic, get_process_lock, cache_is_configured
+from analysis_cache import make_cache_key, get_cached_report, get_cache_diagnostic, put_cached_report, get_process_lock, cache_is_configured
 
 from analysis_engine import (
     apply_source_filter,
@@ -4224,7 +4224,57 @@ def markdown_to_html(content):
     in_table = False
 
     def inline_format(value):
-        safe = html.escape(str(value), quote=True)
+        # Normalize any raw colored span emitted by the model BEFORE escaping.
+        # Otherwise the browser displays literal <span ...> text in table cells.
+        # Decode escaped HTML in cached/LLM reports before processing it.
+        raw = html.unescape(str(value))
+
+        def normalize_colored_span(match):
+            attrs = match.group(1) or ""
+            inner = re.sub(r"<[^>]+>", "", match.group(2) or "")
+            # The requested convention is sign-based: + = green/up, - = red/down.
+            sign_match = re.search(r"[+−-]\s*\d", inner)
+            if sign_match:
+                sign = sign_match.group(0).lstrip().replace("−", "-")[0]
+                token = "[[UP]]" if sign == "+" else "[[DOWN]]"
+                inner = re.sub(r"[↑↓↗↘]", "", inner, count=1).strip()
+                return f"{token} {inner}"
+            arrow_match = re.search(r"[↑↓↗↘]", inner)
+            if arrow_match:
+                arrow = arrow_match.group(0)
+                token = "[[UP]]" if arrow in ("↑", "↗") else "[[DOWN]]"
+                inner = inner.replace(arrow, "", 1).strip()
+                return f"{token} {inner}"
+            return inner
+
+        raw = re.sub(
+            r"<\s*span\b([^>]*)>(.*?)<\s*/\s*span\s*>",
+            normalize_colored_span,
+            raw,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # Normalize existing plain arrows before handling signed percentages.
+        # Their color follows the sign of the change, not the model's color hint.
+        def normalize_plain_arrow(match):
+            sign = match.group(2).replace("−", "-")
+            token = "[[UP]]" if sign == "+" else "[[DOWN]]"
+            return f"{token} {sign}"
+
+        raw = re.sub(r"[↑↓↗↘]\s*([+−-])(?=\s*\d+(?:\.\d+)?\s*(?:%|pp)(?![A-Za-z]))", lambda m: ("[[UP]] " if m.group(1) == "+" else "[[DOWN]] ") + m.group(1), raw)
+
+        # Also normalize plain signed percentage changes, including when the
+        # model omits HTML entirely. Avoid adding a second arrow if one exists.
+        def signed_change(match):
+            # A normalized span may already have supplied the arrow token.
+            prefix = raw[max(0, match.start() - 12):match.start()]
+            if "[[UP]]" in prefix or "[[DOWN]]" in prefix or re.search(r"[↑↓↗↘]\s*$", prefix):
+                return match.group(0)
+            sign = match.group(1).replace("−", "-")
+            token = "[[UP]]" if sign == "+" else "[[DOWN]]"
+            return f"{token} {match.group(0)}"
+
+        raw = re.sub(r"(?<![\w\]↑↓↗↘])([+−-])(?=\s*\d+(?:\.\d+)?\s*(?:%|pp)(?![A-Za-z]))", signed_change, raw)
+        safe = html.escape(raw, quote=True)
         safe = safe.replace("[[UP]]", "<span style=\"color:#22c55e;font-weight:800;\">↑</span>")
         safe = safe.replace("[[DOWN]]", "<span style=\"color:#ef4444;font-weight:800;\">↓</span>")
         safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
@@ -5115,41 +5165,41 @@ if run_analysis:
 
     elif analysis_type == "Overall program analysis":
 
-        # Shared GitHub cache is checked before metric building or any OpenAI call.
         primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
         advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
         cache_key = make_cache_key(
             program_code=program_code,
             primary_data_path=primary_data_path,
             advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-report-structure-2026-10-26-v1",
+            prompt_version="overall-program-prompt-approved-v2",
         )
-        cache_lock = get_process_lock(cache_key)
-        with cache_lock:
-            with st.spinner("Checking shared cache and evaluating program performance..."):
-                cached = get_cached_report(cache_key)
-                cache_diag = get_cache_diagnostic()
 
-                if cached and isinstance(cached.get("report"), str) and cached["report"].strip():
-                    # A hit skips both the report-building work and the OpenAI request.
-                    answer = cached["report"].strip()
-                    metadata = cached.get("metadata", {})
-                    st.session_state.analysis_report = {
-                        "found": True,
-                        "analysis_type": "Overall program analysis",
-                        "program_code": program_code,
-                        "compared_batches": metadata.get("compared_batches", []),
-                        "cache_status": "hit",
-                    }
-                    st.session_state.analysis_text = answer
-                    st.session_state.overall_cache_ui = {
-                        "status": "hit",
-                        "key": cache_key,
-                        "elapsed_seconds": cache_diag.get("elapsed_seconds", 0),
-                        "detail": cache_diag.get("detail", "Loaded saved report from GitHub."),
-                    }
-                else:
-                    try:
+        with st.spinner("Checking the shared report cache..."):
+            try:
+                # The process-local lock avoids duplicate same-key OpenAI calls in this worker.
+                # GitHub stores reports across users and app restarts.
+                with get_process_lock(cache_key):
+                    cached = get_cached_report(cache_key)
+                    cache_diagnostic = get_cache_diagnostic()
+                    if cached:
+                        answer = cached["report"]
+                        metadata = cached.get("metadata", {})
+                        st.session_state.analysis_report = {
+                            "found": True,
+                            "analysis_type": "Overall program analysis",
+                            "program_code": program_code,
+                            "compared_batches": metadata.get("compared_batches", []),
+                            "cache_status": "hit",
+                        }
+                        st.session_state.analysis_text = answer
+                        st.toast("Loaded the shared cached report — no OpenAI call was needed.", icon="⚡")
+                        st.success(f"Shared cache HIT · GitHub read: {cache_diagnostic.get('elapsed_seconds', 0):.2f}s · key: {cache_key[:12]}")
+                    else:
+                        st.warning(
+                            f"Shared cache {cache_diagnostic.get('status', 'miss').upper()} · "
+                            f"GitHub read: {cache_diagnostic.get('elapsed_seconds', 0):.2f}s · "
+                            f"key: {cache_key[:12]} · {cache_diagnostic.get('detail', '')}"
+                        )
                         overall_result = build_overall_program_analysis(
                             raw_df=raw_df,
                             program_code=program_code,
@@ -5159,7 +5209,7 @@ if run_analysis:
                             st.error(overall_result["error"])
                             st.stop()
 
-                        # Keep the approved prompt and report structure unchanged.
+                        # Compact JSON reduces prompt size and latency without changing evidence.
                         overall_payload = json.dumps(
                             overall_result,
                             ensure_ascii=False,
@@ -5168,13 +5218,16 @@ if run_analysis:
                         )
                         overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
 
-REQUIRED OUTPUT (add useful interpretation, but avoid repeating table values verbatim):
-1. Executive diagnosis first: one short paragraph (2 sentences max) stating good/poor/mixed vs plan and history, then 4–6 specific bullets explaining the biggest drivers. Use evidence and compare current batch with both prior batches where possible. No separate lengthy “Why” section.
-2. Plan / Actual table: leads, applications, enrollments, observed spend vs budget, Actual GSV, Planned GSV, GSV variance and attainment where available. Explain the most material gap in 1–2 sentences.
-3. One heading “Current vs previous batch”, with “3.1 Volume and commercial outcomes” (leads, warm leads, applications, enrollments, fee, Actual GSV) and “3.2 Conversion and acquisition efficiency” (L2W, L2A, L2E, W2A, A2E, CPL, CAC). Include both prior batches when available. Change columns show percentages, or percentage points for rates. Arrow markers only: [[UP]] means green ↑ for positive change; [[DOWN]] means red ↓ for negative change. No circles/dots. Use sign-based arrows consistently; program fee remains neutral. Keep absolute values in batch-value columns.
-4. Source-wise performance: a 3–5 line interpretation plus table. Name the strongest and weakest sources only when the data supports it; explain whether the likely funnel issue is at L2W or W2A when L2A is weak. Separate observed facts from hypotheses and mention spend coverage limitations.
-5. Advisor-tenure mix only if present: rank by equal-weight (L2W + L2E) / 2, discuss the top and bottom groups with their lead volumes, and state that the pattern is association, not causation.
-6. Give 3–5 prioritized actions, each linked to a finding and a practical next step. Include what Finance/Marketing should validate when the data cannot establish a cause.
+REQUIRED OUTPUT — preserve this approved section order and naming exactly; do not invent extra top-level sections:
+1. “Executive Diagnosis + Summary of Reason”: start with one concise paragraph (maximum 2 sentences) stating whether the program is doing well, poorly, or mixed against plan and history. Follow with 4–6 short, evidence-backed bullets explaining the largest drivers. Do not add a separate lengthy “Why it performed well or poorly” section.
+2. “Plan vs Actual”: a compact table with leads, applications, enrollments, observed spend vs planned budget, Actual GSV, Planned GSV, GSV variance, and plan attainment where available. Then explain the single most material gap in 1–2 sentences.
+3. “Current vs previous batch”, containing exactly these subsections:
+   - “3.1 Volume and commercial outcomes”: leads, warm leads, applications, enrollments, program fee, Actual GSV.
+   - “3.2 Conversion and acquisition efficiency”: L2W, L2A, L2E, W2A, A2E, CPL, CAC.
+   Compare current with previous and previous-to-previous batches when available. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
+4. “Source-wise root-cause analysis”: provide a concise 3–5 line interpretation followed by a source table. Identify strongest/weakest sources only when supported by adequate data. If lead volume is not the issue but L2A declines, inspect L2W and W2A to locate the funnel leakage. Separate observations from hypotheses and disclose incomplete spend coverage.
+5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation.
+6. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
 
 RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; label this assumption. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; show percentage-point changes. Do not add a Metric Scorecard or duplicate a separate long “Why” section. Do not invent missing metrics or causal explanations. Use valid Markdown tables. Aim for moderate detail: useful interpretation, not a terse summary or a long essay.
 
@@ -5198,13 +5251,15 @@ EVIDENCE JSON:
                             )
                             answer = (response.output_text or "").strip()
                         except Exception:
-                            # Deterministic fallback keeps the existing analysis usable if AI is unavailable.
+                            # Deterministic fallback remains available if AI is unavailable.
                             answer = format_overall_program_fallback(overall_result)
 
                         answer = answer or format_overall_program_fallback(overall_result)
                         compared_batches = [
                             x.get("program_code") for x in overall_result.get("batches", [])
                         ]
+                        # Cache only a complete non-empty report. A GitHub outage does not
+                        # block the user; it simply means this result may not be shared.
                         cache_saved = put_cached_report(
                             cache_key,
                             answer,
@@ -5212,20 +5267,9 @@ EVIDENCE JSON:
                                 "program_code": program_code,
                                 "compared_batches": compared_batches,
                                 "analysis_type": "Overall program analysis",
+                                "prompt_version": "overall-program-prompt-approved-v2",
                             },
                         )
-                        after_write_diag = get_cache_diagnostic()
-                        # Save cache status explicitly so users can confirm the shared cache worked.
-                        st.session_state.overall_cache_ui = {
-                            "status": "saved" if cache_saved else "miss_not_saved",
-                            "key": cache_key,
-                            "elapsed_seconds": cache_diag.get("elapsed_seconds", 0),
-                            "detail": (
-                                "Report saved to GitHub shared cache. The next run for this program and these data files should reuse it."
-                                if cache_saved else
-                                "Report generated, but GitHub cache save failed or is not configured. Check the GitHub cache secrets and token permissions."
-                            ),
-                        }
                         st.session_state.analysis_report = {
                             "found": True,
                             "analysis_type": "Overall program analysis",
@@ -5234,33 +5278,19 @@ EVIDENCE JSON:
                             "cache_status": "saved" if cache_saved else "not_saved",
                         }
                         st.session_state.analysis_text = answer
+                        if cache_is_configured() and not cache_saved:
+                            st.caption("Shared cache could not be updated; the report is available for this session only.")
+                        elif not cache_is_configured():
+                            st.caption("Shared caching is not configured. Add GitHub cache settings in Streamlit Secrets to reuse reports across users and restarts.")
 
-                    except Exception as exc:
-                        st.session_state.analysis_report = {
-                            "found": False,
-                            "analysis_type": "Overall program analysis",
-                            "message": str(exc),
-                        }
-                        st.session_state.analysis_text = None
-                        st.session_state.overall_cache_ui = {
-                            "status": "error", "key": cache_key,
-                            "elapsed_seconds": cache_diag.get("elapsed_seconds", 0),
-                            "detail": str(exc),
-                        }
-                        st.error(f"Overall program analysis failed: {exc}")
-
-        # Visible cache status in the existing page flow; no UI layout changes.
-        cache_ui = st.session_state.get("overall_cache_ui", {})
-        if cache_ui.get("status") == "hit":
-            st.success(f"✅ Cache successful — loaded saved analysis from GitHub in {cache_ui.get('elapsed_seconds', 0):.2f}s. No LLM call was made. (Key: {cache_ui.get('key', '')[:12]})")
-        elif cache_ui.get("status") == "saved":
-            st.success(f"✅ Cache successful — analysis generated and saved to GitHub for the next run. (Key: {cache_ui.get('key', '')[:12]})")
-        elif cache_ui.get("status") == "miss_not_saved":
-            st.warning(f"Cache miss — analysis was generated, but the report was not saved to GitHub. {cache_ui.get('detail', '')}")
-        elif cache_ui.get("status") == "error":
-            st.warning(f"Cache/analysis diagnostic: {cache_ui.get('detail', 'Unknown error')}")
-        elif cache_ui.get("status"):
-            st.info(f"Cache diagnostic: {cache_ui.get('detail', 'No cached report found; generating a new report.')}")
+            except Exception as exc:
+                st.session_state.analysis_report = {
+                    "found": False,
+                    "analysis_type": "Overall program analysis",
+                    "message": str(exc),
+                }
+                st.session_state.analysis_text = None
+                st.error(f"Overall program analysis failed: {exc}")
 
     elif analysis_type == "Batch Analysis":
 
