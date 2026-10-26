@@ -5136,25 +5136,27 @@ TASK:
 Write an executive-ready Overall Program Analysis for {program_code}. Use ONLY the deterministic evidence in the JSON package below.
 
 REQUIRED REPORT STRUCTURE:
-1. Executive diagnosis — clearly state whether the program is doing good/bad, did well/did not do well. Compare planned vs actual and the previous two available batches. Apply this decision rule: if current performance is better than at least one of the previous two available batches, call that out as a positive signal, but do not ignore plan misses, weak funnel conversion, price changes, or major negative metrics.
-2. Why it performed well or poorly — quantified drivers and whether they relate to lead volume, warm-lead quality, conversion, enrollments, observed spend, plan attainment, or program fee/price point.
-3. Summary of the reason — concise 3–4 line conclusion.
-4. Batch-wise comparison — current vs previous and previous-to-previous batch. Include planned vs actual for available fields and all available metric comparisons.
-5. Metric scorecard — leads, warm leads, applications, enrollments, L2W, L2A, L2E, W2A, A2E, CPL and CAC. Show values in a Markdown table; use N/A for unavailable data.
-6. Source-wise performance and root cause — provide a concise 3–4 line summary plus a Markdown table. Identify best and weakest sources using volume, conversion, spend evidence and downstream outcomes. When lead volume is not the issue but L2A has declined, explicitly inspect L2W and W2A to locate where the funnel is weakening. Do not call a source good/bad on conversion alone without considering volume.
-7. Advisor-tenure mix (only if advisor data is present) — compare the tenure groups for the current and historical batches where available. Explain which mix has stronger conversion, but do not claim causal impact.
-8. Prioritized actions — specific actions grounded in evidence, no invented targets.
+1. Executive diagnosis at the very top: start with ONE short paragraph (2–3 sentences maximum) explicitly saying whether the program is performing well or poorly, based on plan and historical performance. Immediately follow with 3–5 concise reason bullets synthesizing the most important drivers. This section combines the former Executive Diagnosis and Summary of the reason. Do not repeat a long, detailed diagnosis.
+2. Planned versus actual — heading must be exactly "Plan / Actual" (not "Plan / Attainment"). Include plan and actual columns, including manually calculated Actual GSV, Planned GSV, GSV variance and GSV plan attainment where available.
+3. Current versus previous batches — compare the selected batch with each of the two previous available batches. For every column titled "Change vs [batch]", show ONLY the percentage change (or pp change for conversion rates); do not show absolute value plus percentage in these change columns. Historical batch columns may show the batch metric values.
+4. Funnel and efficiency metrics — include leads, warm leads, applications, enrollments, L2W, L2A, L2E, W2A, A2E, CPL and CAC in relevant tables, without a separate section titled "Metric scorecard" and without duplicating the same figures in a standalone scorecard.
+5. Source-wise performance and root cause — concise 3–4 line summary plus a table. Identify best and weakest sources using volume, conversion, spend evidence and downstream outcomes. When lead volume is not the issue but L2A has declined, inspect L2W and W2A to locate the funnel weakness. Do not call a source good/bad on conversion alone without considering volume.
+6. Advisor-tenure mix (only if advisor data is present) — rank tenure groups with priority given to L2W and L2E. The best-tenure calculation should use an equal-weight priority score: (L2W + L2E) / 2, where both rates are available. Explain that this is an observed association, not proof of causal impact.
+7. Prioritized actions — specific actions grounded in evidence, no invented targets.
 
 ANALYTICAL RULES:
 - Use source metrics from the JSON as authoritative; do not invent or recalculate missing values.
 - Treat missing values as N/A, never as zero.
 - Check price point (program fee) when explaining GCV or enrollment differences; fee is program-level and repeated across source rows, not summed.
-- The source file contains Planned_GSV but no actual GSV field. Do not present Planned_GSV as actual GSV, and do not infer actual GSV unless the source supports it.
+- Calculate Actual GSV manually as total enrollments × the program-level total_program_fees_sf. The fee is repeated across source rows, so take it once and never sum it. In this dataset Planned_GSV values are expressed in crore units; convert them to rupees (× 10,000,000) before comparing against calculated Actual GSV. Label this unit conversion clearly.
 - Spend is observed only on rows with spend values; call it observed spend and note incomplete coverage if appropriate.
 - L2W = warm leads/leads; L2A = applications/leads; L2E = enrollments/leads; W2A = applications/warm leads; A2E = enrollments/applications. Show percentages and use percentage-point differences when comparing rates.
 - CPL and CAC use observed spend and must be caveated when spend coverage is incomplete.
 - For sources with sufficient lead volume but reduced L2A, diagnose whether the drop is at L2W, W2A, or both. Separate observed facts from hypotheses.
 - Compare the current batch to the previous and previous-to-previous available batches. If references are missing from the dataset, explicitly state this; do not fabricate history.
+- Do not create a separate "Metric scorecard" section. Do not add a long standalone "Why it performed well or poorly" bullet section; its concise key reasons belong in the opening Executive diagnosis. Detailed metrics can remain in the relevant tables later.
+- For the comparison table, columns like "Change vs PCPF_09" and "Change vs PCPF_08" must contain percentages only (pp for rate changes), never an absolute value alongside the percentage.
+- Use "Plan / Actual" as the planned-versus-actual table heading/column framing; do not use "Plan / Attainment" as the heading.
 - Use only valid Markdown tables. Be concise, commercial, and evidence-based. Do not claim causation from observational data.
 
 DETERMINISTIC ANALYSIS JSON:

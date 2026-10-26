@@ -54,8 +54,11 @@ def _program_metrics(rows: pd.DataFrame) -> dict[str, Any]:
     plan_leads = _sum(rows, "Planned_Lead")
     plan_apps = _sum(rows, "Planned_Application")
     plan_enrols = _sum(rows, "Planned_Enrollment")
-    plan_gsv = _sum(rows, "Planned_GSV")
-    # Planned_GSV is not actual GSV; do not infer actual GSV from fee x enrolments.
+    plan_gsv_crore = _sum(rows, "Planned_GSV")
+    # In this dataset Planned_GSV is stored in crore units, while fees are in rupees.
+    # Actual GSV is calculated manually as enrolled learners x program fee.
+    actual_gsv = enrols * fee if enrols is not None and fee is not None else None
+    planned_gsv = plan_gsv_crore * 10_000_000 if plan_gsv_crore is not None else None
     return {
         "leads": leads, "warm_leads": warm, "applications": apps, "enrollments": enrols,
         "spend_observed": spend, "program_fee": fee,
@@ -65,7 +68,11 @@ def _program_metrics(rows: pd.DataFrame) -> dict[str, Any]:
         "CPL": _ratio(spend, leads), "CAC": _ratio(spend, enrols),
         "planned_budget": plan_budget, "planned_leads": plan_leads,
         "planned_applications": plan_apps, "planned_enrollments": plan_enrols,
-        "planned_gsv": plan_gsv,
+        "actual_gsv": actual_gsv,
+        "planned_gsv": planned_gsv,
+        "planned_gsv_crore_source": plan_gsv_crore,
+        "gsv_variance": actual_gsv - planned_gsv if actual_gsv is not None and planned_gsv is not None else None,
+        "gsv_plan_attainment_pct": _ratio(actual_gsv, planned_gsv),
         "budget_attainment_pct": _ratio(spend, plan_budget),
         "lead_plan_attainment_pct": _ratio(leads, plan_leads),
         "application_plan_attainment_pct": _ratio(apps, plan_apps),
@@ -125,13 +132,18 @@ def _advisor_table(advisor_df: pd.DataFrame | None, batch: str):
     for tenure, g in rows.groupby("opp_agent_tenure_mth", dropna=False):
         leads, warm = _sum(g, "leads"), _sum(g, "warm")
         apps, enrols = _sum(g, "apps"), _sum(g, "enrols")
+        l2w = _ratio(warm, leads)
+        l2e = _ratio(enrols, leads)
+        # Best-tenure ranking intentionally prioritizes L2W and L2E equally.
+        priority_score = (l2w + l2e) / 2 if l2w is not None and l2e is not None else (l2w if l2e is None else l2e)
         out.append({
             "advisor_tenure": str(tenure) if pd.notna(tenure) else "NA / missing",
             "leads": leads, "warm_leads": warm, "applications": apps, "enrollments": enrols,
-            "L2W": _ratio(warm, leads), "L2A": _ratio(apps, leads), "L2E": _ratio(enrols, leads),
+            "L2W": l2w, "L2A": _ratio(apps, leads), "L2E": l2e,
             "W2A": _ratio(apps, warm), "A2E": _ratio(enrols, apps),
+            "tenure_priority_score": priority_score,
         })
-    return sorted(out, key=lambda x: (x["enrollments"] or 0), reverse=True)
+    return sorted(out, key=lambda x: (x["tenure_priority_score"] is not None, x["tenure_priority_score"] or -1), reverse=True)
 
 
 def build_overall_program_analysis(raw_df: pd.DataFrame, program_code: str,
@@ -178,7 +190,7 @@ def build_overall_program_analysis(raw_df: pd.DataFrame, program_code: str,
         "status": current_rows["program_status_f"].dropna().astype(str).iloc[0] if "program_status_f" in current_rows and current_rows["program_status_f"].notna().any() else None,
         "category": current_rows["category"].dropna().astype(str).iloc[0] if "category" in current_rows and current_rows["category"].notna().any() else None,
         "program_fee_note": "total_program_fees_sf is a program-level value repeated across source rows; treated as one value, not summed.",
-        "gsv_note": "Only Planned_GSV is supplied. Actual GSV is unavailable and has not been fabricated.",
+        "gsv_note": "Actual GSV is manually calculated as enrollments × total_program_fees_sf. Planned_GSV source values are in crore units and are converted to rupees for like-for-like comparison.",
         "batch_chain": chain,
         "batches": batch_reports,
         "comparisons_to_previous_batches": comparisons,
@@ -203,33 +215,55 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
     lines = [
         f"# Overall Program Analysis — {result['program_code']}",
         "## Executive diagnosis",
-        "Historical and plan comparisons below are based only on supplied data. Actual GSV is unavailable.",
-        "## Current batch metrics",
-        "| Metric | Actual / observed | Planned |",
+        "Overall assessment should be based on plan attainment and the two available historical comparisons. The concise reason summary and supporting detail follow below.",
+        "## Planned versus actual",
+        "| Metric | Plan | Actual |",
         "|---|---:|---:|",
     ]
-    for label, key, plan_key in [
-        ("Leads","leads","planned_leads"),("Warm leads","warm_leads",None),
-        ("Applications","applications","planned_applications"),("Enrollments","enrollments","planned_enrollments"),
-        ("Spend observed","spend_observed","planned_budget"),("Program fee","program_fee",None),
-        ("L2W","L2W",None),("L2A","L2A",None),("L2E","L2E",None),("W2A","W2A",None),("A2E","A2E",None),
-        ("CPL","CPL",None),("CAC","CAC",None),("Planned GSV","planned_gsv",None),
+    for label, plan_key, actual_key in [
+        ("Leads", "planned_leads", "leads"),
+        ("Applications", "planned_applications", "applications"),
+        ("Enrollments", "planned_enrollments", "enrollments"),
+        ("Budget / observed spend", "planned_budget", "spend_observed"),
+        ("GSV (₹)", "planned_gsv", "actual_gsv"),
     ]:
-        pct = key in {"L2W","L2A","L2E","W2A","A2E"}
-        lines.append(f"| {label} | {fmt(m.get(key), pct)} | {fmt(m.get(plan_key) if plan_key else None)} |")
-    lines += ["## Previous batch comparison", "| Batch | Leads | Warm leads | Apps | Enrols | L2A | L2E | CPL | CAC | Fee |",
-              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
-    for b in result["batches"][1:]:
-        x=b["metrics"]
-        lines.append("| " + " | ".join([b["program_code"]] + [fmt(x.get(k), k in {"L2A","L2E"}) for k in ["leads","warm_leads","applications","enrollments","L2A","L2E","CPL","CAC","program_fee"]]) + " |")
+        lines.append(f"| {label} | {fmt(m.get(plan_key))} | {fmt(m.get(actual_key))} |")
+    lines += ["## Funnel and efficiency metrics", "| Metric | Actual |", "|---|---:|"]
+    for label, key in [("Warm leads", "warm_leads"), ("L2W", "L2W"), ("L2A", "L2A"), ("L2E", "L2E"), ("W2A", "W2A"), ("A2E", "A2E"), ("CPL", "CPL"), ("CAC", "CAC"), ("Program fee", "program_fee")]:
+        lines.append(f"| {label} | {fmt(m.get(key), key in {"L2W","L2A","L2E","W2A","A2E"})} |")
+    prior_batches = result["batches"][1:3]
+    prev1 = prior_batches[0]["program_code"] if prior_batches else "Previous batch"
+    prev2 = prior_batches[1]["program_code"] if len(prior_batches) > 1 else "Previous-to-previous"
+    lines += ["## Current versus previous batches", "Change columns show percentage change only (conversion-rate changes are percentage points).",
+              f"| Metric | Current batch | Change vs {prev1} | {prev1} | Change vs {prev2} | {prev2} |",
+              "|---|---:|---:|---:|---:|---:|"]
+    comparison_keys = [("Leads", "leads", False), ("Warm leads", "warm_leads", False), ("Applications", "applications", False),
+                       ("Enrollments", "enrollments", False), ("L2W", "L2W", True), ("L2A", "L2A", True), ("L2E", "L2E", True),
+                       ("W2A", "W2A", True), ("A2E", "A2E", True), ("CPL", "CPL", False), ("CAC", "CAC", False),
+                       ("Actual GSV (₹)", "actual_gsv", False), ("Program fee (₹)", "program_fee", False)]
+    for label, key, is_rate in comparison_keys:
+        cells = [label, fmt(m.get(key), is_rate)]
+        for old in prior_batches:
+            old_m = old["metrics"]
+            cur_v, old_v = m.get(key), old_m.get(key)
+            if cur_v is None or old_v in (None, 0):
+                change = "N/A"
+            elif is_rate:
+                change = f"{(cur_v-old_v)*100:+.1f} pp"
+            else:
+                change = f"{(cur_v-old_v)/abs(old_v)*100:+.1f}%"
+            cells.extend([change, fmt(old_m.get(key), is_rate)])
+        while len(cells) < 6:
+            cells.extend(["N/A", "N/A"])
+        lines.append("| " + " | ".join(cells[:6]) + " |")
     lines += ["## Source-wise root cause (3–4 line summary)", "See source scorecard below; prioritize sources with adequate lead volume but lower L2A, then inspect L2W and W2A to locate the funnel drop.", 
               "| Source | Leads | Warm | Apps | Enrols | L2W | L2A | W2A | A2E | CPL | CAC |",
               "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for s in current.get("source_performance", []):
         lines.append("| " + " | ".join([s["source"]] + [fmt(s.get(k), k in {"L2W","L2A","L2E","W2A","A2E"}) for k in ["leads","warm_leads","applications","enrollments","L2W","L2A","W2A","A2E","CPL","CAC"]]) + " |")
     if current.get("advisor_tenure_mix"):
-        lines += ["## Advisor tenure mix", "| Tenure | Leads | Warm | Apps | Enrols | L2W | L2A | W2A | A2E |",
-                  "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+        lines += ["## Advisor tenure mix (ranked by L2W and L2E)", "| Tenure | Leads | Warm | Apps | Enrols | L2W | L2E | Priority score |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|"]
         for s in current["advisor_tenure_mix"]:
-            lines.append("| " + " | ".join([s["advisor_tenure"]] + [fmt(s.get(k), k in {"L2W","L2A","L2E","W2A","A2E"}) for k in ["leads","warm_leads","applications","enrollments","L2W","L2A","W2A","A2E"]]) + " |")
+            lines.append("| " + " | ".join([s["advisor_tenure"]] + [fmt(s.get(k), k in {"L2W","L2E"}) for k in ["leads","warm_leads","applications","enrollments","L2W","L2E","tenure_priority_score"]]) + " |")
     return "\n".join(lines)
