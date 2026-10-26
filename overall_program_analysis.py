@@ -234,27 +234,50 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
     prior_batches = result["batches"][1:3]
     prev1 = prior_batches[0]["program_code"] if prior_batches else "Previous batch"
     prev2 = prior_batches[1]["program_code"] if len(prior_batches) > 1 else "Previous-to-previous"
-    lines += ["## Current versus previous batches", "Change columns show percentage change only (conversion-rate changes are percentage points).",
+    lines += ["## 3. Current vs previous batch", "Legend: 🟢 ↑ positive movement · 🔴 ↓ negative movement. Conversion-rate changes are percentage points; other changes are percentages.",
+              "### 3.1 Volume and commercial outcomes",
               f"| Metric | Current batch | Change vs {prev1} | {prev1} | Change vs {prev2} | {prev2} |",
               "|---|---:|---:|---:|---:|---:|"]
-    comparison_keys = [("Leads", "leads", False), ("Warm leads", "warm_leads", False), ("Applications", "applications", False),
-                       ("Enrollments", "enrollments", False), ("L2W", "L2W", True), ("L2A", "L2A", True), ("L2E", "L2E", True),
-                       ("W2A", "W2A", True), ("A2E", "A2E", True), ("CPL", "CPL", False), ("CAC", "CAC", False),
-                       ("Actual GSV (₹)", "actual_gsv", False), ("Program fee (₹)", "program_fee", False)]
-    for label, key, is_rate in comparison_keys:
+    volume_keys = [("Leads", "leads", True), ("Warm leads", "warm_leads", True), ("Applications", "applications", True),
+                   ("Enrollments", "enrollments", True), ("Program fee (₹)", "program_fee", None), ("Actual GSV (₹)", "actual_gsv", True)]
+    def trend_marker(key, change_value):
+        if change_value is None or key == "program_fee": return ""
+        # Positive means commercially better, not merely numerically higher.
+        favorable = change_value < 0 if key in {"CPL", "CAC"} else change_value > 0
+        return ("🟢 ↑ " if favorable else "🔴 ↓ ") if change_value != 0 else ""
+    for label, key, favorable_higher in volume_keys:
+        cells = [label, fmt(m.get(key))]
+        for old in prior_batches:
+            old_m = old["metrics"]
+            cur_v, old_v = m.get(key), old_m.get(key)
+            if cur_v is None or old_v in (None, 0):
+                change, delta = "N/A", None
+            else:
+                delta = (cur_v-old_v)/abs(old_v)*100
+                change = f"{delta:+.1f}%"
+            cells.extend([trend_marker(key, delta) + change, fmt(old_m.get(key))])
+        while len(cells) < 6: cells.extend(["N/A", "N/A"])
+        lines.append("| " + " | ".join(cells[:6]) + " |")
+    lines += ["### 3.2 Conversion and acquisition efficiency",
+              f"| Metric | Current batch | Change vs {prev1} | {prev1} | Change vs {prev2} | {prev2} |",
+              "|---|---:|---:|---:|---:|---:|"]
+    efficiency_keys = [("L2W", "L2W", True), ("L2A", "L2A", True), ("L2E", "L2E", True), ("W2A", "W2A", True),
+                       ("A2E", "A2E", True), ("CPL", "CPL", False), ("CAC", "CAC", False)]
+    for label, key, is_rate in efficiency_keys:
         cells = [label, fmt(m.get(key), is_rate)]
         for old in prior_batches:
             old_m = old["metrics"]
             cur_v, old_v = m.get(key), old_m.get(key)
             if cur_v is None or old_v in (None, 0):
-                change = "N/A"
+                change, delta = "N/A", None
             elif is_rate:
-                change = f"{(cur_v-old_v)*100:+.1f} pp"
+                delta = (cur_v-old_v)*100
+                change = f"{delta:+.1f} pp"
             else:
-                change = f"{(cur_v-old_v)/abs(old_v)*100:+.1f}%"
-            cells.extend([change, fmt(old_m.get(key), is_rate)])
-        while len(cells) < 6:
-            cells.extend(["N/A", "N/A"])
+                delta = (cur_v-old_v)/abs(old_v)*100
+                change = f"{delta:+.1f}%"
+            cells.extend([trend_marker(key, delta) + change, fmt(old_m.get(key), is_rate)])
+        while len(cells) < 6: cells.extend(["N/A", "N/A"])
         lines.append("| " + " | ".join(cells[:6]) + " |")
     lines += ["## Source-wise root cause (3–4 line summary)", "See source scorecard below; prioritize sources with adequate lead volume but lower L2A, then inspect L2W and W2A to locate the funnel drop.", 
               "| Source | Leads | Warm | Apps | Enrols | L2W | L2A | W2A | A2E | CPL | CAC |",
