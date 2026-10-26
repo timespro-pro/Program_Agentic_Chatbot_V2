@@ -5134,15 +5134,15 @@ if run_analysis:
                 )
                 overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
 
-REQUIRED OUTPUT:
-1. Executive diagnosis at the top: 1 short paragraph (2 sentences max) saying good/poor/mixed based on plan and history, followed by 3–5 concise reason bullets. No separate lengthy “Why it performed well or poorly” section.
-2. Plan / Actual table: plan and actual for leads, applications, enrollments, observed spend/budget, Actual GSV, Planned GSV, GSV variance and attainment where available.
-3. One heading “Current vs previous batch”, with subsections “3.1 Volume and commercial outcomes” (leads, warm leads, applications, enrollments, fee, Actual GSV) and “3.2 Conversion and acquisition efficiency” (L2W, L2A, L2E, W2A, A2E, CPL, CAC). Include both prior batches when available. Change columns show percentage only, or percentage points for rates. Color arrows only: [[UP]] for green ↑ and [[DOWN]] for red ↓; no circles/dots. Interpret direction by metric meaning (higher conversions/volume/GSV positive; higher CPL/CAC negative; fee neutral). Keep absolute values only in batch-value columns.
-4. Source-wise performance: 3–4 lines plus table; identify stronger/weaker sources using volume, funnel conversions and observed spend. If L2A drops, inspect L2W and W2A. Distinguish facts from hypotheses.
-5. Advisor-tenure mix only if present: prioritize tenure groups by equal-weight (L2W + L2E) / 2 when both exist. State this is association, not causation.
-6. Prioritized evidence-based actions.
+REQUIRED OUTPUT (add useful interpretation, but avoid repeating table values verbatim):
+1. Executive diagnosis first: one short paragraph (2 sentences max) stating good/poor/mixed vs plan and history, then 4–6 specific bullets explaining the biggest drivers. Use evidence and compare current batch with both prior batches where possible. No separate lengthy “Why” section.
+2. Plan / Actual table: leads, applications, enrollments, observed spend vs budget, Actual GSV, Planned GSV, GSV variance and attainment where available. Explain the most material gap in 1–2 sentences.
+3. One heading “Current vs previous batch”, with “3.1 Volume and commercial outcomes” (leads, warm leads, applications, enrollments, fee, Actual GSV) and “3.2 Conversion and acquisition efficiency” (L2W, L2A, L2E, W2A, A2E, CPL, CAC). Include both prior batches when available. Change columns show percentages, or percentage points for rates. Arrow markers only: [[UP]] means green ↑ for positive change; [[DOWN]] means red ↓ for negative change. No circles/dots. Use sign-based arrows consistently; program fee remains neutral. Keep absolute values in batch-value columns.
+4. Source-wise performance: a 3–5 line interpretation plus table. Name the strongest and weakest sources only when the data supports it; explain whether the likely funnel issue is at L2W or W2A when L2A is weak. Separate observed facts from hypotheses and mention spend coverage limitations.
+5. Advisor-tenure mix only if present: rank by equal-weight (L2W + L2E) / 2, discuss the top and bottom groups with their lead volumes, and state that the pattern is association, not causation.
+6. Give 3–5 prioritized actions, each linked to a finding and a practical next step. Include what Finance/Marketing should validate when the data cannot establish a cause.
 
-RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; clearly label conversion. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; use percentage-point changes. Do not add a Metric Scorecard or standalone long “Why” section. Use valid Markdown tables and concise wording.
+RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; label this assumption. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; show percentage-point changes. Do not add a Metric Scorecard or duplicate a separate long “Why” section. Do not invent missing metrics or causal explanations. Use valid Markdown tables. Aim for moderate detail: useful interpretation, not a terse summary or a long essay.
 
 EVIDENCE JSON:
 {overall_payload}
@@ -5159,7 +5159,7 @@ EVIDENCE JSON:
                             "tables. Never invent metrics, history, or causes. Use N/A when evidence is unavailable."
                         ),
                         input=overall_prompt,
-                        max_output_tokens=4500,
+                        max_output_tokens=5200,
                         reasoning={"effort": "low"},
                     )
                     answer = (response.output_text or "").strip()

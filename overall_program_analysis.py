@@ -241,10 +241,11 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
     volume_keys = [("Leads", "leads", True), ("Warm leads", "warm_leads", True), ("Applications", "applications", True),
                    ("Enrollments", "enrollments", True), ("Program fee (₹)", "program_fee", None), ("Actual GSV (₹)", "actual_gsv", True)]
     def trend_marker(key, change_value):
-        if change_value is None or key == "program_fee": return ""
-        # Positive means commercially better, not merely numerically higher.
-        favorable = change_value < 0 if key in {"CPL", "CAC"} else change_value > 0
-        return ("[[UP]] " if favorable else "[[DOWN]] ") if change_value != 0 else ""
+        # Direction follows the sign shown in the comparison cell: positive = green up,
+        # negative = red down. Program fee is a contextual price point, so it stays neutral.
+        if change_value is None or key == "program_fee" or change_value == 0:
+            return ""
+        return "[[UP]] " if change_value > 0 else "[[DOWN]] "
     for label, key, favorable_higher in volume_keys:
         cells = [label, fmt(m.get(key))]
         for old in prior_batches:
