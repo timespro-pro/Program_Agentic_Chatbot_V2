@@ -5174,7 +5174,7 @@ if run_analysis:
             prompt_version="overall-program-prompt-approved-v2",
         )
 
-        with st.spinner("Checking the shared report cache..."):
+        with st.container():
             try:
                 # The process-local lock avoids duplicate same-key OpenAI calls in this worker.
                 # GitHub stores reports across users and app restarts.
@@ -5192,14 +5192,7 @@ if run_analysis:
                             "cache_status": "hit",
                         }
                         st.session_state.analysis_text = answer
-                        st.toast("Loaded the shared cached report — no OpenAI call was needed.", icon="⚡")
-                        st.success(f"Shared cache HIT · GitHub read: {cache_diagnostic.get('elapsed_seconds', 0):.2f}s · key: {cache_key[:12]}")
                     else:
-                        st.warning(
-                            f"Shared cache {cache_diagnostic.get('status', 'miss').upper()} · "
-                            f"GitHub read: {cache_diagnostic.get('elapsed_seconds', 0):.2f}s · "
-                            f"key: {cache_key[:12]} · {cache_diagnostic.get('detail', '')}"
-                        )
                         overall_result = build_overall_program_analysis(
                             raw_df=raw_df,
                             program_code=program_code,
@@ -5278,10 +5271,6 @@ EVIDENCE JSON:
                             "cache_status": "saved" if cache_saved else "not_saved",
                         }
                         st.session_state.analysis_text = answer
-                        if cache_is_configured() and not cache_saved:
-                            st.caption("Shared cache could not be updated; the report is available for this session only.")
-                        elif not cache_is_configured():
-                            st.caption("Shared caching is not configured. Add GitHub cache settings in Streamlit Secrets to reuse reports across users and restarts.")
 
             except Exception as exc:
                 st.session_state.analysis_report = {
