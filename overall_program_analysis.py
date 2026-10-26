@@ -214,9 +214,13 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
         return f"{x*100:.1f}%" if pct else f"{x:,.2f}"
     lines = [
         f"# Overall Program Analysis — {result['program_code']}",
-        "## Executive diagnosis",
-        "Overall assessment should be based on plan attainment and the two available historical comparisons. The concise reason summary and supporting detail follow below.",
-        "## Planned versus actual",
+        "## Executive Diagnosis + Summary of Reason",
+        "The LLM report could not be generated, so this is a deterministic evidence-based fallback. Assess performance against plan and the available historical batches; do not infer causes beyond the supplied metrics.",
+        "- Compare current results with plan attainment and both prior batches where available.",
+        "- Check the largest volume gaps in leads, applications, and enrollments.",
+        "- Check funnel rates to distinguish lead-volume weakness from conversion leakage.",
+        "- Treat CPL/CAC as observed-spend metrics because spend coverage may be incomplete.",
+        "## Plan vs Actual",
         "| Metric | Plan | Actual |",
         "|---|---:|---:|",
     ]
@@ -228,9 +232,6 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
         ("GSV (₹)", "planned_gsv", "actual_gsv"),
     ]:
         lines.append(f"| {label} | {fmt(m.get(plan_key))} | {fmt(m.get(actual_key))} |")
-    lines += ["## Funnel and efficiency metrics", "| Metric | Actual |", "|---|---:|"]
-    for label, key in [("Warm leads", "warm_leads"), ("L2W", "L2W"), ("L2A", "L2A"), ("L2E", "L2E"), ("W2A", "W2A"), ("A2E", "A2E"), ("CPL", "CPL"), ("CAC", "CAC"), ("Program fee", "program_fee")]:
-        lines.append(f"| {label} | {fmt(m.get(key), key in {"L2W","L2A","L2E","W2A","A2E"})} |")
     prior_batches = result["batches"][1:3]
     prev1 = prior_batches[0]["program_code"] if prior_batches else "Previous batch"
     prev2 = prior_batches[1]["program_code"] if len(prior_batches) > 1 else "Previous-to-previous"
@@ -280,14 +281,20 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
             cells.extend([trend_marker(key, delta) + change, fmt(old_m.get(key), is_rate)])
         while len(cells) < 6: cells.extend(["N/A", "N/A"])
         lines.append("| " + " | ".join(cells[:6]) + " |")
-    lines += ["## Source-wise root cause (3–4 line summary)", "See source scorecard below; prioritize sources with adequate lead volume but lower L2A, then inspect L2W and W2A to locate the funnel drop.", 
+    lines += ["## Source-wise root-cause analysis", "Review sources with sufficient lead volume and comparatively weak L2A. Where L2A is weak, inspect L2W and W2A to identify where the funnel narrows; observed-spend CPL/CAC may be incomplete.", 
               "| Source | Leads | Warm | Apps | Enrols | L2W | L2A | W2A | A2E | CPL | CAC |",
               "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for s in current.get("source_performance", []):
         lines.append("| " + " | ".join([s["source"]] + [fmt(s.get(k), k in {"L2W","L2A","L2E","W2A","A2E"}) for k in ["leads","warm_leads","applications","enrollments","L2W","L2A","W2A","A2E","CPL","CAC"]]) + " |")
     if current.get("advisor_tenure_mix"):
-        lines += ["## Advisor tenure mix (ranked by L2W and L2E)", "| Tenure | Leads | Warm | Apps | Enrols | L2W | L2E | Priority score |",
+        lines += ["## Advisor-tenure mix", "Ranked using equal-weight score (L2W + L2E) / 2; the pattern is associative and does not establish causation.", "| Tenure | Leads | Warm | Apps | Enrols | L2W | L2E | Priority score |",
                   "|---|---:|---:|---:|---:|---:|---:|---:|"]
         for s in current["advisor_tenure_mix"]:
             lines.append("| " + " | ".join([s["advisor_tenure"]] + [fmt(s.get(k), k in {"L2W","L2E"}) for k in ["leads","warm_leads","applications","enrollments","L2W","L2E","tenure_priority_score"]]) + " |")
+    lines += [
+        "## Prioritized actions",
+        "1. Validate the largest plan-versus-actual gap with Finance and confirm the completeness of plan fields.",
+        "2. Where L2A is weak, inspect L2W and W2A by source before changing lead volume or budget.",
+        "3. Validate spend coverage before making budget decisions based on CPL or CAC.",
+    ]
     return "\n".join(lines)
