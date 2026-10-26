@@ -13,6 +13,7 @@ from agent import ask_agent
 from source_analysis import analyze_sources, format_source_analysis_markdown
 from batch_analysis import analyze_batch_history, format_batch_analysis_markdown
 from overall_program_analysis import build_overall_program_analysis, format_overall_program_fallback
+from analysis_cache import make_cache_key, get_cached_report, put_cached_report, get_process_lock, cache_is_configured
 
 from analysis_engine import (
     apply_source_filter,
@@ -5163,25 +5164,51 @@ if run_analysis:
 
     elif analysis_type == "Overall program analysis":
 
-        with st.spinner("Evaluating plan attainment, the last two available batches, source performance, and advisor-tenure mix..."):
-            try:
-                overall_result = build_overall_program_analysis(
-                    raw_df=raw_df,
-                    program_code=program_code,
-                    advisor_df=advisor_df,
-                )
-                if overall_result.get("error"):
-                    st.error(overall_result["error"])
-                    st.stop()
+        primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
+        advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
+        cache_key = make_cache_key(
+            program_code=program_code,
+            primary_data_path=primary_data_path,
+            advisor_data_path=advisor_data_path,
+            prompt_version="overall-program-prompt-v1",
+        )
 
-                # Compact JSON reduces prompt size and latency without changing the evidence.
-                overall_payload = json.dumps(
-                    overall_result,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    default=str,
-                )
-                overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
+        with st.spinner("Checking the shared report cache, then analyzing plan, batch history, sources, and advisor mix if needed..."):
+            try:
+                # The process-local lock avoids duplicate same-key OpenAI calls in this worker.
+                # GitHub stores reports across users and app restarts.
+                with get_process_lock(cache_key):
+                    cached = get_cached_report(cache_key)
+                    if cached:
+                        answer = cached["report"]
+                        metadata = cached.get("metadata", {})
+                        st.session_state.analysis_report = {
+                            "found": True,
+                            "analysis_type": "Overall program analysis",
+                            "program_code": program_code,
+                            "compared_batches": metadata.get("compared_batches", []),
+                            "cache_status": "hit",
+                        }
+                        st.session_state.analysis_text = answer
+                        st.toast("Loaded the shared cached report — no OpenAI call was needed.", icon="⚡")
+                    else:
+                        overall_result = build_overall_program_analysis(
+                            raw_df=raw_df,
+                            program_code=program_code,
+                            advisor_df=advisor_df,
+                        )
+                        if overall_result.get("error"):
+                            st.error(overall_result["error"])
+                            st.stop()
+
+                        # Compact JSON reduces prompt size and latency without changing evidence.
+                        overall_payload = json.dumps(
+                            overall_result,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            default=str,
+                        )
+                        overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
 
 REQUIRED OUTPUT (add useful interpretation, but avoid repeating table values verbatim):
 1. Executive diagnosis first: one short paragraph (2 sentences max) stating good/poor/mixed vs plan and history, then 4–6 specific bullets explaining the biggest drivers. Use evidence and compare current batch with both prior batches where possible. No separate lengthy “Why” section.
@@ -5197,34 +5224,52 @@ EVIDENCE JSON:
 {overall_payload}
 """.strip()
 
-                try:
-                    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-                    model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
-                    response = client.responses.create(
-                        model=model,
-                        instructions=(
-                            "You are a senior marketing analytics consultant. Follow the requested report "
-                            "structure exactly. Return complete Markdown with numbered headings and valid Markdown "
-                            "tables. Never invent metrics, history, or causes. Use N/A when evidence is unavailable."
-                        ),
-                        input=overall_prompt,
-                        max_output_tokens=5200,
-                        reasoning={"effort": "low"},
-                    )
-                    answer = (response.output_text or "").strip()
-                except Exception:
-                    # Deterministic fallback keeps this analysis useful if AI is unavailable.
-                    answer = format_overall_program_fallback(overall_result)
+                        try:
+                            client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+                            model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
+                            response = client.responses.create(
+                                model=model,
+                                instructions=(
+                                    "You are a senior marketing analytics consultant. Follow the requested report "
+                                    "structure exactly. Return complete Markdown with numbered headings and valid Markdown "
+                                    "tables. Never invent metrics, history, or causes. Use N/A when evidence is unavailable."
+                                ),
+                                input=overall_prompt,
+                                max_output_tokens=5200,
+                                reasoning={"effort": "low"},
+                            )
+                            answer = (response.output_text or "").strip()
+                        except Exception:
+                            # Deterministic fallback remains available if AI is unavailable.
+                            answer = format_overall_program_fallback(overall_result)
 
-                st.session_state.analysis_report = {
-                    "found": True,
-                    "analysis_type": "Overall program analysis",
-                    "program_code": program_code,
-                    "compared_batches": [
-                        x.get("program_code") for x in overall_result.get("batches", [])
-                    ],
-                }
-                st.session_state.analysis_text = answer or format_overall_program_fallback(overall_result)
+                        answer = answer or format_overall_program_fallback(overall_result)
+                        compared_batches = [
+                            x.get("program_code") for x in overall_result.get("batches", [])
+                        ]
+                        # Cache only a complete non-empty report. A GitHub outage does not
+                        # block the user; it simply means this result may not be shared.
+                        cache_saved = put_cached_report(
+                            cache_key,
+                            answer,
+                            metadata={
+                                "program_code": program_code,
+                                "compared_batches": compared_batches,
+                                "analysis_type": "Overall program analysis",
+                            },
+                        )
+                        st.session_state.analysis_report = {
+                            "found": True,
+                            "analysis_type": "Overall program analysis",
+                            "program_code": program_code,
+                            "compared_batches": compared_batches,
+                            "cache_status": "saved" if cache_saved else "not_saved",
+                        }
+                        st.session_state.analysis_text = answer
+                        if cache_is_configured() and not cache_saved:
+                            st.caption("Shared cache could not be updated; the report is available for this session only.")
+                        elif not cache_is_configured():
+                            st.caption("Shared caching is not configured. Add GitHub cache settings in Streamlit Secrets to reuse reports across users and restarts.")
 
             except Exception as exc:
                 st.session_state.analysis_report = {
