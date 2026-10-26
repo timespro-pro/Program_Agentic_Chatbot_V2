@@ -4223,7 +4223,56 @@ def markdown_to_html(content):
     in_table = False
 
     def inline_format(value):
-        safe = html.escape(str(value), quote=True)
+        # Normalize any raw colored span emitted by the model BEFORE escaping.
+        # Otherwise the browser displays literal <span ...> text in table cells.
+        raw = str(value)
+
+        def normalize_colored_span(match):
+            attrs = match.group(1) or ""
+            inner = re.sub(r"<[^>]+>", "", match.group(2) or "")
+            # The requested convention is sign-based: + = green/up, - = red/down.
+            sign_match = re.search(r"[+−-]\s*\d", inner)
+            if sign_match:
+                sign = sign_match.group(0).lstrip().replace("−", "-")[0]
+                token = "[[UP]]" if sign == "+" else "[[DOWN]]"
+                inner = re.sub(r"[↑↓↗↘]", "", inner, count=1).strip()
+                return f"{token} {inner}"
+            arrow_match = re.search(r"[↑↓↗↘]", inner)
+            if arrow_match:
+                arrow = arrow_match.group(0)
+                token = "[[UP]]" if arrow in ("↑", "↗") else "[[DOWN]]"
+                inner = inner.replace(arrow, "", 1).strip()
+                return f"{token} {inner}"
+            return inner
+
+        raw = re.sub(
+            r"<span\b([^>]*)>(.*?)</span>",
+            normalize_colored_span,
+            raw,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # Normalize existing plain arrows before handling signed percentages.
+        # Their color follows the sign of the change, not the model's color hint.
+        def normalize_plain_arrow(match):
+            sign = match.group(2).replace("−", "-")
+            token = "[[UP]]" if sign == "+" else "[[DOWN]]"
+            return f"{token} {sign}"
+
+        raw = re.sub(r"[↑↓↗↘]\s*([+−-])(?=\s*\d+(?:\.\d+)?\s*(?:%|pp)(?![A-Za-z]))", lambda m: ("[[UP]] " if m.group(1) == "+" else "[[DOWN]] ") + m.group(1), raw)
+
+        # Also normalize plain signed percentage changes, including when the
+        # model omits HTML entirely. Avoid adding a second arrow if one exists.
+        def signed_change(match):
+            # A normalized span may already have supplied the arrow token.
+            prefix = raw[max(0, match.start() - 12):match.start()]
+            if "[[UP]]" in prefix or "[[DOWN]]" in prefix or re.search(r"[↑↓↗↘]\s*$", prefix):
+                return match.group(0)
+            sign = match.group(1).replace("−", "-")
+            token = "[[UP]]" if sign == "+" else "[[DOWN]]"
+            return f"{token} {match.group(0)}"
+
+        raw = re.sub(r"(?<![\w\]↑↓↗↘])([+−-])(?=\s*\d+(?:\.\d+)?\s*(?:%|pp)(?![A-Za-z]))", signed_change, raw)
+        safe = html.escape(raw, quote=True)
         safe = safe.replace("[[UP]]", "<span style=\"color:#22c55e;font-weight:800;\">↑</span>")
         safe = safe.replace("[[DOWN]]", "<span style=\"color:#ef4444;font-weight:800;\">↓</span>")
         safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
