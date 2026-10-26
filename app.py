@@ -4511,14 +4511,78 @@ def render_ai_diagnosis(
 
 @st.cache_data
 def load_primary_data():
-    """Load the unified dataset used by the overall analysis tool."""
-    data_path = APP_DIR / "data" / "Batch_wise_program_data.csv"
+    """Load and normalize Version 2's Program Batch Data source."""
+    data_path = APP_DIR / "data" / "Program Batch Data.csv"
     if not data_path.exists():
         raise FileNotFoundError(
-            f"Unified data source not found: {data_path}. "
-            "Place Batch_wise_program_data.csv inside the data/ folder."
+            f"Program Batch Data source not found: {data_path}. "
+            "Place Program Batch Data.csv inside the data/ folder."
         )
-    return pd.read_csv(data_path, low_memory=False)
+    df = pd.read_csv(data_path, low_memory=False)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Normalize known schema differences without fabricating actual outcomes.
+    aliases = {
+        "total_program_fees_sf": "total_program_fees",
+        "program_fee": "total_program_fees",
+        "source": "source_created",
+    }
+    for source_col, target_col in aliases.items():
+        if target_col not in df.columns and source_col in df.columns:
+            df[target_col] = df[source_col]
+
+    # The existing analysis modules support a broader schema. Missing fields are
+    # explicitly unavailable (NaN); planned GSV is never copied into actual GSV.
+    expected_optional = [
+        "gsv_cr", "paid_leads", "paid_enrollments", "paid_gsv_cr", "paid_spends",
+        "planned_paid_leads", "planned_paid_enrollments", "planned_paid_gsv", "planned_paid_spends",
+        "previous_batch_leads", "previous_batch_warm_leads", "previous_batch_applications",
+        "previous_batch_enrollments", "previous_batch_gsv_cr", "previous_batch_spends",
+        "previous_batch_Planned_Budget", "previous_batch_Planned_Lead",
+        "previous_batch_Planned_Application", "previous_batch_Planned_Enrollment",
+        "previous_batch_Planned_GSV", "previous_batch_paid_leads", "previous_batch_paid_enrollments",
+        "previous_batch_paid_gsv_cr", "previous_batch_paid_spends",
+        "previous_batch_planned_paid_leads", "previous_batch_planned_paid_enrollments",
+        "previous_batch_planned_paid_gsv", "previous_batch_planned_paid_spends",
+    ]
+    for col in expected_optional:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    numeric_columns = [
+        "leads", "warm_leads", "applications", "enrollments", "spends",
+        "total_program_fees", "application_fees_c", "Planned_Budget", "Planned_Lead",
+        "Planned_Application", "Planned_Enrollment", "Planned_GSV", "gsv_cr",
+    ]
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    if "sales_start_date" in df.columns:
+        df["sales_start_date"] = pd.to_datetime(df["sales_start_date"], errors="coerce", dayfirst=True)
+    for col in ["program_code", "previous_batch_code", "category", "financial_year", "program_status_f", "source_created", "tech_management", "New_Repeat"]:
+        if col in df.columns:
+            df[col] = df[col].astype("string").str.strip()
+    return df
+
+
+@st.cache_data
+def load_advisor_mix_data():
+    """Load the advisor-tenure table separately; never join it onto source rows."""
+    data_path = APP_DIR / "data" / "Advisor Mix.csv"
+    if not data_path.exists():
+        return pd.DataFrame(columns=["program_code", "opp_agent_tenure_mth", "leads", "apps", "enrols", "warm"])
+    df = pd.read_csv(data_path, low_memory=False)
+    df.columns = [str(c).strip() for c in df.columns]
+    aliases = {"apps": "applications", "enrols": "enrollments", "warm": "warm_leads"}
+    for source_col, target_col in aliases.items():
+        if target_col not in df.columns and source_col in df.columns:
+            df[target_col] = df[source_col]
+    for col in ["leads", "applications", "enrollments", "warm_leads"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    if "program_code" in df.columns:
+        df["program_code"] = df["program_code"].astype("string").str.strip()
+    return df
 
 
 try:
@@ -4534,10 +4598,10 @@ except Exception as exc:
     st.stop()
 
 
-# The old Program Check Tool CSV has been retired. Keep this alias for
-# backward-compatible calls in the existing UI helpers; it points to the
-# same unified dataset, not a second data source.
+# Program Batch Data is the primary source. Advisor Mix remains separate because
+# its grain is advisor tenure rather than acquisition source.
 check_df = raw_df
+advisor_mix_df = load_advisor_mix_data()
 
 
 # =========================================================
