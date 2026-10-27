@@ -140,6 +140,8 @@ def analyze_batch_history(
             code = str(code).strip()
             if code and code != program_code and code in available_codes and code not in selected:
                 selected.append(code)
+            if len(selected) >= 3:
+                break
         lineage = [program_code] + selected
     else:
         lineage = full_lineage[:max(1, int(max_batches))]

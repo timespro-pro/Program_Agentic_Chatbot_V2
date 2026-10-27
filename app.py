@@ -5038,13 +5038,16 @@ with old_col:
     selected_old = st.multiselect(
         "Old Batch",
         options=old_options,
-        default=previous_selected,
-        placeholder="Select one or more old batches",
+        default=previous_selected[:3],
+        placeholder="Select up to 3 old batches",
         label_visibility="collapsed",
         key="old_batch_selector",
+        max_selections=3,
     )
 
-    st.session_state.selected_old_batch = list(selected_old)
+    # Keep session state aligned with the maximum allowed historical selection.
+    selected_old = list(selected_old)[:3]
+    st.session_state.selected_old_batch = selected_old
 
 
 
@@ -5059,7 +5062,7 @@ program_code = (
 # Keep the full selection for the UI/session state and use the first selected
 # batch for that single-batch comparison path. Batch Analysis independently
 # traces and compares the available historical lineage.
-old_batch_codes = list(selected_old) if selected_old else []
+old_batch_codes = list(dict.fromkeys(selected_old))[:3] if selected_old else []
 old_batch_code = old_batch_codes[0] if old_batch_codes else None
 
 
@@ -5322,10 +5325,15 @@ EVIDENCE JSON:
 
         with st.spinner("Analyzing the New Batch against your selected Old Batches..."):
             try:
-                selected_old_for_analysis = list(dict.fromkeys(code for code in old_batch_codes if code in old_options))
+                # Include exactly the user's selected old batches, up to three.
+                # Combined with the selected new batch, the report covers at most four batches.
+                selected_old_for_analysis = list(dict.fromkeys(
+                    code for code in old_batch_codes if code in old_options
+                ))[:3]
                 batch_result = analyze_batch_history(
                     raw_df,
                     program_code=program_code,
+                    max_batches=4,
                     selected_old_batches=selected_old_for_analysis,
                 )
                 batch_markdown = format_batch_analysis_markdown(batch_result)
@@ -5349,7 +5357,7 @@ Rules:
 - Separate observations from hypotheses; use pp for differences between percentages.
 - Use compact, valid Markdown tables only where they add value. Do not reproduce every metric multiple times.
 - Keep narrative concise: prioritize the largest quantified changes, persistent trends, reversals, plan gaps, and practical next actions.
-- Analyze exactly the batches selected by the user: the selected New Batch plus every selected Old Batch. Do not add unselected batches or impose a four-batch limit. Planned-versus-actual comparisons must cover every selected batch where plan data exists.
+- Analyze exactly the batches selected by the user: the selected New Batch plus each selected Old Batch, capped at the first 3 selected Old Batches. The total must never exceed 4 batches. If the user selects 1, 2, or 3 Old Batches, analyze only those selected batches; do not add extra historical batches. If more than 3 Old Batches are submitted by stale state or another caller, use only the first 3 selected Old Batches. Planned-versus-actual comparisons must cover every included batch where plan data exists.
 - Explicitly analyze total_program_fee (or legacy total_program_fees, if present) as the program price point across batches: show fee changes in amount and percentage, and explain whether fee movement may affect GSV.
 - Explicitly include the deterministic GSV impact decomposition when available: enrollment-volume effect versus fee/price effect. State whether it reconciles to observed GSV change; if not, explain that the attribution is incomplete and do not overstate it.
 - Treat total_program_fee (or legacy total_program_fees) as a program-level value repeated across source rows, never sum it across rows.
