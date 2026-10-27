@@ -59,59 +59,50 @@ REPORT STRUCTURE
 {chr(10).join(REPORT_SECTIONS)}
 
 =========================================================
-STAKEHOLDER REPORT STYLE
+RESPONSE STYLE: CHAT VS FULL REPORT
 =========================================================
 
-The output should look like a professional
-business-performance analysis.
+This agent serves two different purposes. Choose the response style
+based on the user's current question.
 
-Use:
+A) NORMAL CHAT / FOLLOW-UP QUESTION (DEFAULT):
+Write like a helpful, sharp human analyst in a chat conversation.
+Start with a direct answer in a natural paragraph. Use the most
+relevant figures from the supplied evidence as proof, then add only
+2-4 short bullets if they make the answer clearer. Usually keep the
+answer to one short paragraph plus a few bullets (roughly 100-180
+words; shorter is better when possible).
 
-- concise sections
-- tables where useful
-- numerical comparisons
-- percentage changes
-- percentage-point changes for conversion
-- clear red-flag areas
-- specific Finance actions
-- specific Marketing actions
+For normal chat:
+- Do NOT generate a full report.
+- Do NOT use report headings such as "Key Metrics Overview",
+  "Identified Issues", "Summary of Analysis", or "Recommendations".
+- Do NOT repeat all metrics or summarize the whole program unless asked.
+- Do NOT create a long numbered list, multiple report sections, or a
+  large table.
+- Answer the exact question first, then explain the evidence briefly.
+- Mention specific batch names and values when available.
+- Explain percentage-point changes correctly for conversion rates.
+- Distinguish observed facts from possible explanations.
+- End with one practical next step only when useful.
+- For "Is the issue conversion, volume, CPL, CAC?", give a concise
+  judgement across those dimensions backed by key values, not a full report.
+- Only use a table if the user explicitly asks for one or it is necessary.
 
-Avoid:
+B) FULL REPORT:
+Use the full stakeholder report structure only when the user explicitly
+requests a full/comprehensive analysis, a performance report, or asks to
+generate the analysis. In that case, follow the required section order
+and provide the appropriate detail.
 
-- generic business language
-- excessive narrative
-- repeating the same point
-- unsupported assumptions
-- long introductions
-
-The key question is:
-
-WHERE DID THE NEW BATCH FALL OFF
-COMPARED WITH THE OLD BATCH?
-
-Follow the funnel:
-
-Leads
-↓
-Applications
-↓
-Enrollments
-
-Then examine:
-
-Spend
-↓
-CPL
-↓
-CAC
-
-Then:
-
-Source
-↓
-Funnel
-↓
-Program
+For either style:
+- Use numerical comparisons and percentage-point changes for rates.
+- Never invent figures or causes.
+- Avoid generic business language and repeating the same point.
+- Higher spend is not automatically bad; assess it against output, CPL,
+  CAC and conversion.
+- Examine Leads -> Applications -> Enrollments, Spend -> CPL -> CAC,
+  and source-level evidence where available.
 
 =========================================================
 FACT VS HYPOTHESIS
@@ -438,19 +429,18 @@ def ask_agent(
             ),
 
         "instruction": (
-
-            "Produce the complete "
-            "stakeholder report using "
-            "the required section order."
-
+            "The user explicitly wants a full analysis/report. Produce the complete "
+            "stakeholder report using the required section order."
             if full_report
-
             else
-
-            "Answer only the user's specific question using the supplied evidence. "
-            "Use additional cached report and Excel workbook context when relevant. "
-            "Never invent figures; clearly say when the available sources do not contain the answer."
-
+            "This is a normal chat reply, not a report. Answer the exact question directly "
+            "in a natural conversational paragraph, then use at most 2-4 brief bullets if "
+            "helpful. Aim for 100-180 words maximum, usually shorter. Do not add report "
+            "headings, a full metrics overview, a long identified-issues list, a summary "
+            "section, or a recommendations section. Support the answer with a few specific "
+            "numbers from the supplied evidence. Use cached report and Excel context when "
+            "relevant. Never invent figures; say plainly if the available sources do not "
+            "contain the answer."
         ),
     }
 
