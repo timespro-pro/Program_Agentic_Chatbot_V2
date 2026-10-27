@@ -5171,7 +5171,7 @@ if run_analysis:
             program_code=program_code,
             primary_data_path=primary_data_path,
             advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-prompt-approved-v2",
+            prompt_version="overall-program-prompt-where-wrong-v3",
         )
 
         with st.container():
@@ -5212,17 +5212,22 @@ if run_analysis:
                         overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
 
 REQUIRED OUTPUT — preserve this approved section order and naming exactly; do not invent extra top-level sections:
-1. “Executive Diagnosis + Summary of Reason”: start with one concise paragraph (maximum 2 sentences) stating whether the program is doing well, poorly, or mixed against plan and history. Follow with 4–6 short, evidence-backed bullets explaining the largest drivers. Do not add a separate lengthy “Why it performed well or poorly” section.
-2. “Plan vs Actual”: a compact table with leads, applications, enrollments, observed spend vs planned budget, Actual GSV, Planned GSV, GSV variance, and plan attainment where available. Then explain the single most material gap in 1–2 sentences.
-3. “Current vs previous batch”, containing exactly these subsections:
+1. “Executive Diagnosis + Summary of Reason”: start with one concise paragraph (maximum 2 sentences) stating whether the program is doing well, poorly, or mixed against plan and history. Follow with 4–6 short, evidence-backed bullets explaining the largest drivers.
+2. “Where it went wrong”: immediately after the Executive Diagnosis section and before “Plan vs Actual”, include a concise diagnostic section with 4–5 numbered points explaining why the program is underperforming or mixed. Every point must cite specific observed metrics and quantify the gap against plan and/or selected previous batches. Distinguish evidence from hypotheses; do not invent causes. Include a compact rating summary with these two independent dimensions:
+   - Plan vs Actual rating: calculate attainment for leads, applications, enrollments, spend/budget and GSV where available. Use a 5-level scale based on the proportion of relevant metrics meeting or exceeding plan: 5 = Excellent (80–100% of metrics meet plan); 4 = Good (60–79%); 3 = Mixed (40–59%); 2 = Poor (20–39%); 1 = Critical (under 20%). Count only metrics with valid plan and actual values; if fewer than two comparable metrics exist, label the rating “Insufficient plan data” instead of scoring. For spend, do not treat overspending as good plan attainment; explain budget variance separately.
+   - Historical comparison rating: compare current batch with each selected/available previous batch using leads, warm leads, applications, enrollments, L2W, L2A, L2E, W2A, A2E, CPL and CAC where comparable. Score direction-aware metrics: higher conversion/volume is generally better, lower CPL/CAC is better. A metric counts as improved only when the direction supports improvement. Report the share of comparable metrics improved and map it to 5 = Excellent (80–100% improved); 4 = Good (60–79%); 3 = Mixed (40–59%); 2 = Poor (20–39%); 1 = Critical (under 20%). Show separate comparisons against each prior batch; do not average unavailable data or imply a ranking if metrics are not comparable. If fewer than three comparable metrics exist, label “Insufficient history data”.
+   - Give an overall performance label (“Good”, “Mixed”, “Bad”, or “Insufficient data”) based on both ratings: Bad when either valid rating is Critical/Poor and neither is Good/Excellent; Mixed when ratings disagree or land in the Mixed band; Good only when both are Good/Excellent; Insufficient data when neither rating can be calculated. Briefly state the reason for the overall label.
+   - Present the ratings as a small Markdown table with columns Dimension, Score, Label, Basis. Be transparent that these are evidence-based diagnostic heuristics, not official management thresholds. Do not let the rating replace the detailed metrics or claim causality.
+3. “Plan vs Actual”: a compact table with leads, applications, enrollments, observed spend vs planned budget, Actual GSV, Planned GSV, GSV variance, and plan attainment where available. Then explain the single most material gap in 1–2 sentences.
+4. “Current vs previous batch”, containing exactly these subsections:
    - “3.1 Volume and commercial outcomes”: leads, warm leads, applications, enrollments, program fee, Actual GSV.
    - “3.2 Conversion and acquisition efficiency”: L2W, L2A, L2E, W2A, A2E, CPL, CAC.
    Compare current with previous and previous-to-previous batches when available. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
-4. “Source-wise root-cause analysis”: provide a concise 3–5 line interpretation followed by a source table. Identify strongest/weakest sources only when supported by adequate data. If lead volume is not the issue but L2A declines, inspect L2W and W2A to locate the funnel leakage. Separate observations from hypotheses and disclose incomplete spend coverage.
-5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation.
-6. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
+5. “Source-wise root-cause analysis”: provide a concise 3–5 line interpretation followed by a source table. Identify strongest/weakest sources only when supported by adequate data. If lead volume is not the issue but L2A declines, inspect L2W and W2A to locate the funnel leakage. Separate observations from hypotheses and disclose incomplete spend coverage.
+6. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation.
+7. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
 
-RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; label this assumption. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; show percentage-point changes. Do not add a Metric Scorecard or duplicate a separate long “Why” section. Do not invent missing metrics or causal explanations. Use valid Markdown tables. Aim for moderate detail: useful interpretation, not a terse summary or a long essay.
+RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; label this assumption. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; show percentage-point changes. Do not add a separate Metric Scorecard; the requested “Where it went wrong” rating table is required. Do not invent missing metrics or causal explanations. Use valid Markdown tables. Aim for moderate detail: useful interpretation, not a terse summary or a long essay.
 
 EVIDENCE JSON:
 {overall_payload}
@@ -5260,7 +5265,7 @@ EVIDENCE JSON:
                                 "program_code": program_code,
                                 "compared_batches": compared_batches,
                                 "analysis_type": "Overall program analysis",
-                                "prompt_version": "overall-program-prompt-approved-v2",
+                                "prompt_version": "overall-program-prompt-where-wrong-v3",
                             },
                         )
                         st.session_state.analysis_report = {
