@@ -67,12 +67,14 @@ def file_fingerprint(path: str | Path | None) -> str:
 
 def make_cache_key(program_code: str, primary_data_path: str | Path,
                    advisor_data_path: str | Path | None = None,
-                   prompt_version: str = CACHE_SCHEMA_VERSION) -> str:
+                   prompt_version: str = CACHE_SCHEMA_VERSION,
+                   selected_old_batches: list[str] | tuple[str, ...] | None = None) -> str:
     payload = {
         "schema": CACHE_SCHEMA_VERSION,
         "prompt_version": prompt_version,
         "analysis_type": "Overall program analysis",
         "program_code": str(program_code).strip(),
+        "selected_old_batches": [str(x).strip() for x in (selected_old_batches or [])],
         "primary_data_sha256": file_fingerprint(primary_data_path),
         "advisor_data_sha256": file_fingerprint(advisor_data_path),
     }

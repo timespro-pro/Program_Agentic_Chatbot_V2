@@ -147,7 +147,8 @@ def _advisor_table(advisor_df: pd.DataFrame | None, batch: str):
 
 
 def build_overall_program_analysis(raw_df: pd.DataFrame, program_code: str,
-                                   advisor_df: pd.DataFrame | None = None) -> dict[str, Any]:
+                                   advisor_df: pd.DataFrame | None = None,
+                                   selected_old_batches: list[str] | None = None) -> dict[str, Any]:
     if raw_df is None or raw_df.empty or "program_code" not in raw_df:
         return {"error": "Program Batch Data is empty or missing program_code."}
     df = raw_df.copy()
@@ -156,7 +157,23 @@ def build_overall_program_analysis(raw_df: pd.DataFrame, program_code: str,
     if current_rows.empty:
         return {"error": f"Selected program {program_code} was not found in Program Batch Data."}
 
-    chain = _batch_chain(df, str(program_code), max_previous=2)
+    available_codes = set(df["program_code"].dropna().astype(str).str.strip())
+    if selected_old_batches is not None:
+        # Use only the exact old batches selected in the UI, in selection order,
+        # with a hard limit of three historical batches (four total including new).
+        selected_codes = []
+        for value in selected_old_batches:
+            code = str(value).strip()
+            if code and code != str(program_code).strip() and code in available_codes and code not in selected_codes:
+                selected_codes.append(code)
+            if len(selected_codes) >= 3:
+                break
+        chain = [
+            {"program_code": code, "status": "Available"}
+            for code in selected_codes
+        ]
+    else:
+        chain = _batch_chain(df, str(program_code), max_previous=3)
     batch_reports = []
     codes = [str(program_code)] + [x["program_code"] for x in chain if x["status"] == "Available"]
     for code in codes:
@@ -194,7 +211,9 @@ def build_overall_program_analysis(raw_df: pd.DataFrame, program_code: str,
         "batch_chain": chain,
         "batches": batch_reports,
         "comparisons_to_previous_batches": comparisons,
-        "decision_rule": "Classify as good if current performance is better than at least one of the previous two available batches, while also evaluating planned-vs-actual and price point. If prior batches are unavailable, state that limitation.",
+        "selected_old_batches": [x["program_code"] for x in chain if x["status"] == "Available"],
+        "selection_mode": "user_selected" if selected_old_batches is not None else "automatic_lineage",
+        "decision_rule": "Evaluate plan attainment and compare the current batch with every selected historical batch provided in the evidence. If historical batches are unavailable, state that limitation.",
         "metric_definitions": {
             "L2W": "warm leads / leads", "L2A": "applications / leads", "L2E": "enrollments / leads",
             "W2A": "applications / warm leads", "A2E": "enrollments / applications",

@@ -5170,11 +5170,15 @@ if run_analysis:
 
         primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
         advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
+        selected_old_for_analysis = list(dict.fromkeys(
+            code for code in old_batch_codes if code in old_options
+        ))[:3]
         cache_key = make_cache_key(
             program_code=program_code,
             primary_data_path=primary_data_path,
             advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-prompt-approved-v3-where-it-went-wrong",
+            prompt_version="overall-program-prompt-v4-selected-batches-up-to-four",
+            selected_old_batches=selected_old_for_analysis,
         )
 
         with st.container():
@@ -5191,7 +5195,8 @@ if run_analysis:
                             "found": True,
                             "analysis_type": "Overall program analysis",
                             "program_code": program_code,
-                            "compared_batches": metadata.get("compared_batches", []),
+                            "compared_batches": metadata.get("compared_batches", [program_code] + selected_old_for_analysis),
+                            "selected_old_batches": metadata.get("selected_old_batches", selected_old_for_analysis),
                             "cache_status": "hit",
                         }
                         st.session_state.analysis_text = answer
@@ -5200,6 +5205,7 @@ if run_analysis:
                             raw_df=raw_df,
                             program_code=program_code,
                             advisor_df=advisor_df,
+                            selected_old_batches=selected_old_for_analysis,
                         )
                         if overall_result.get("error"):
                             st.error(overall_result["error"])
@@ -5221,7 +5227,7 @@ Immediately after section 1, add a new section titled “Where it went wrong”.
 3. “Current vs previous batch”, containing exactly these subsections:
    - “3.1 Volume and commercial outcomes”: leads, warm leads, applications, enrollments, program fee, Actual GSV.
    - “3.2 Conversion and acquisition efficiency”: L2W, L2A, L2E, W2A, A2E, CPL, CAC.
-   Compare current with previous and previous-to-previous batches when available. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
+   Compare the current batch with every selected Old Batch in the evidence (up to three old batches, four total). Include each selected batch as its own value column and comparison. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
 4. “Source-wise root-cause analysis”: provide a concise 3–5 line interpretation followed by a source table. Identify strongest/weakest sources only when supported by adequate data. If lead volume is not the issue but L2A declines, inspect L2W and W2A to locate the funnel leakage. Separate observations from hypotheses and disclose incomplete spend coverage.
 5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation.
 6. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
@@ -5294,9 +5300,10 @@ EVIDENCE JSON:
                             answer,
                             metadata={
                                 "program_code": program_code,
-                                "compared_batches": compared_batches,
+                                "compared_batches": [program_code] + selected_old_for_analysis,
+                                "selected_old_batches": selected_old_for_analysis,
                                 "analysis_type": "Overall program analysis",
-                                "prompt_version": "overall-program-prompt-approved-v3-where-it-went-wrong",
+                                "prompt_version": "overall-program-prompt-v4-selected-batches-up-to-four",
                             },
                         )
                         st.session_state.analysis_report = {
