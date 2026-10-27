@@ -5171,7 +5171,7 @@ if run_analysis:
             program_code=program_code,
             primary_data_path=primary_data_path,
             advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-prompt-approved-v2",
+            prompt_version="overall-program-prompt-approved-v3-where-it-went-wrong",
         )
 
         with st.container():
@@ -5244,6 +5244,38 @@ EVIDENCE JSON:
                                 reasoning={"effort": "low"},
                             )
                             answer = (response.output_text or "").strip()
+
+                            # Validate the required new section before caching the report.
+                            # If the model omits it, ask for only that missing section and insert it
+                            # immediately after the Executive Diagnosis section.
+                            if answer and "where it went wrong" not in answer.lower():
+                                repair = client.responses.create(
+                                    model=model,
+                                    instructions=(
+                                        "Write only the missing Markdown section requested. "
+                                        "Use only the supplied evidence, do not invent values, "
+                                        "and return a section heading plus 4-5 concise points."
+                                    ),
+                                    input=(
+                                        f"Add a section titled 'Where it went wrong' for program {program_code}. "
+                                        "Include 4-5 evidence-backed points comparing plan vs actual and current "
+                                        "batch vs up to two prior batches where available. Include plan-attainment "
+                                        "and historical-comparison ratings only when evidence is sufficient. "
+                                        "Place this section after 'Executive Diagnosis + Summary of Reason'. "
+                                        "Do not repeat other sections.\n\nEVIDENCE JSON:\n"
+                                        + overall_payload
+                                    ),
+                                    max_output_tokens=1600,
+                                    reasoning={"effort": "low"},
+                                )
+                                missing_section = (repair.output_text or "").strip()
+                                if missing_section:
+                                    # Insert directly after the first executive-diagnosis section block.
+                                    next_heading = re.search(r"(?m)^##?\\s+(?:2[.)]?\\s*)?(?:Plan vs Actual|Planned versus actual)", answer, re.I)
+                                    if next_heading:
+                                        answer = answer[:next_heading.start()].rstrip() + "\\n\\n" + missing_section + "\\n\\n" + answer[next_heading.start():]
+                                    else:
+                                        answer = answer.rstrip() + "\\n\\n" + missing_section
                         except Exception:
                             # Deterministic fallback remains available if AI is unavailable.
                             answer = format_overall_program_fallback(overall_result)
@@ -5261,7 +5293,7 @@ EVIDENCE JSON:
                                 "program_code": program_code,
                                 "compared_batches": compared_batches,
                                 "analysis_type": "Overall program analysis",
-                                "prompt_version": "overall-program-prompt-approved-v2",
+                                "prompt_version": "overall-program-prompt-approved-v3-where-it-went-wrong",
                             },
                         )
                         st.session_state.analysis_report = {
