@@ -309,4 +309,6 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
                   "|---|---:|---:|---:|---:|---:|---:|---:|"]
         for s in current["advisor_tenure_mix"]:
             lines.append("| " + " | ".join([s["advisor_tenure"]] + [fmt(s.get(k), k in {"L2W","L2E"}) for k in ["leads","warm_leads","applications","enrollments","L2W","L2E","tenure_priority_score"]]) + " |")
+        lines.append("")
+        lines.append("Experience interpretation: Lower tenure-month values represent more experienced advisors, while higher values represent less experienced advisors. Use the L2W/L2E ranking and lead volumes above to identify which experience groups perform better in this dataset; this is an association, not proof that tenure causes the difference.")
     return "\n".join(lines)

@@ -5086,25 +5086,11 @@ def show_data_preview():
 
 
 # =========================================================
-# ANALYSIS TYPE SELECTOR
+# ANALYSIS TYPE
 # =========================================================
-
-analysis_options = [
-    "Source analysis",
-    "Batch Analysis",
-    "Overall program analysis",
-    "Category analysis (coming soon)",
-    "Paid performance analysis (coming soon)",
-    "Funnel diagnostics (coming soon)",
-]
-
-analysis_type = st.selectbox(
-    "Analysis type",
-    options=analysis_options,
-    index=0,
-    key="analysis_type_selector",
-    help="Choose an analysis. Source analysis, Batch Analysis, and Overall program analysis are available.",
-)
+# Analysis type selection is intentionally hidden. This tool always runs
+# Overall program analysis.
+analysis_type = "Overall program analysis"
 
 
 # =========================================================
@@ -5229,7 +5215,7 @@ Immediately after section 1, add a new section titled “Where it went wrong”.
    - “3.2 Conversion and acquisition efficiency”: L2W, L2A, L2E, W2A, A2E, CPL, CAC.
    Compare the current batch with every selected Old Batch in the evidence (up to three old batches, four total). Include each selected batch as its own value column and comparison. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
 4. “Source-wise root-cause analysis”: provide a concise 3–5 line interpretation followed by a source table. Identify strongest/weakest sources only when supported by adequate data. If lead volume is not the issue but L2A declines, inspect L2W and W2A to locate the funnel leakage. Separate observations from hypotheses and disclose incomplete spend coverage.
-5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation.
+5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation. Add a brief 1–2 sentence experience interpretation directly under this section: lower tenure-month values mean more experienced advisors, while higher tenure-month values mean less experienced advisors. Relate the observed performance of the tenure groups to this experience scale only where the table supports it; do not infer causation.
 6. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
 
 RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; label this assumption. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; show percentage-point changes. Do not add a separate Metric Scorecard; the specifically requested “Where it went wrong” section is required and should not be duplicated elsewhere. Do not invent missing metrics or causal explanations. Use valid Markdown tables. Aim for moderate detail: useful interpretation, not a terse summary or a long essay.
