@@ -5663,9 +5663,116 @@ render_optimal_launch_metrics(
 )
 
 
+
+
+# =========================================================
+# CHAT DATA SOURCES: GITHUB CACHED REPORT + EXCEL WORKBOOKS
+# =========================================================
+
+def _chat_dataframe_context(frame: pd.DataFrame, label: str, selected_code: str | None = None,
+                            max_rows: int = 35) -> str:
+    """Build a compact, grounded context block from a dataframe."""
+    if frame is None or frame.empty:
+        return f"Source: {label}\nNo rows available."
+    view = frame.copy()
+    if selected_code and "program_code" in view.columns:
+        match = view["program_code"].astype(str).str.strip().eq(str(selected_code).strip())
+        if match.any():
+            view = view.loc[match]
+    view = view.head(max_rows)
+    try:
+        table = view.to_csv(index=False)
+    except Exception:
+        table = view.astype(str).to_string(index=False)
+    if len(table) > 14000:
+        table = table[:14000] + "\n[truncated for context length]"
+    return (
+        f"Source: {label}\n"
+        f"Rows in loaded source: {len(frame)}; rows provided below: {len(view)}\n"
+        f"Columns: {', '.join(map(str, frame.columns))}\n"
+        f"Data (CSV format):\n{table}"
+    )
+
+
+def _load_excel_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
+    """Read any .xlsx/.xls workbooks placed in data/ and expose their sheets to chat."""
+    blocks = []
+    if not data_dir.exists():
+        return "No data directory found for Excel workbooks."
+    paths = sorted(list(data_dir.glob("*.xlsx")) + list(data_dir.glob("*.xls")))
+    if not paths:
+        return "No .xlsx or .xls workbooks found in the app data/ directory."
+    for path in paths:
+        try:
+            workbook = pd.ExcelFile(path)
+            for sheet_name in workbook.sheet_names:
+                frame = pd.read_excel(path, sheet_name=sheet_name)
+                blocks.append(_chat_dataframe_context(
+                    frame, f"Excel workbook {path.name} | sheet {sheet_name}",
+                    selected_code=selected_code, max_rows=30
+                ))
+        except Exception as exc:
+            blocks.append(f"Source: Excel workbook {path.name}\nCould not read workbook: {exc}")
+    return "\n\n".join(blocks)
+
+
+def _get_chat_cached_report(selected_code: str | None) -> str:
+    """Fetch the current program's cached Overall Program Analysis report from GitHub."""
+    if not selected_code:
+        return "No program is selected; no program-specific cached report was requested."
+    try:
+        primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
+        advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
+        key = make_cache_key(
+            program_code=selected_code,
+            primary_data_path=primary_data_path,
+            advisor_data_path=advisor_data_path,
+            prompt_version="overall-program-prompt-approved-v3-where-it-went-wrong",
+        )
+        cached = get_cached_report(key)
+        if cached and cached.get("report"):
+            return (
+                f"GitHub cached Overall Program Analysis for program {selected_code}:\n"
+                + str(cached["report"])[:24000]
+            )
+    except Exception:
+        pass
+    # When this session has already generated or retrieved a report, use it even if
+    # the GitHub lookup is temporarily unavailable.
+    session_report = st.session_state.get("analysis_text")
+    report_meta = st.session_state.get("analysis_report") or {}
+    if session_report and (
+        not report_meta.get("program_code") or str(report_meta.get("program_code")) == str(selected_code)
+    ):
+        return f"Current session Overall Program Analysis for {selected_code}:\n{str(session_report)[:24000]}"
+    return (
+        f"No cached Overall Program Analysis was found for {selected_code}. "
+        "Answer from the available spreadsheet/data context and do not pretend a report was retrieved."
+    )
+
+
+def _build_chat_extra_context(selected_code: str | None, data_frame: pd.DataFrame) -> str:
+    parts = []
+    parts.append(_get_chat_cached_report(selected_code))
+    parts.append(_chat_dataframe_context(
+        data_frame, "Program Batch Data.csv", selected_code=selected_code, max_rows=35
+    ))
+    try:
+        parts.append(_chat_dataframe_context(
+            advisor_df, "Advisor Mix.csv", selected_code=selected_code, max_rows=30
+        ))
+    except Exception:
+        pass
+    parts.append(_load_excel_chat_context(APP_DIR / "data", selected_code=selected_code))
+    return "\n\n--- SOURCE SEPARATOR ---\n\n".join(parts)
+
+
 # =========================================================
 # CHAT HISTORY
 # =========================================================
+
+# Keep only the latest five messages (user + assistant messages combined).
+st.session_state.chat_history = st.session_state.chat_history[-5:]
 
 for message in st.session_state.chat_history:
 
@@ -5732,7 +5839,11 @@ if question:
                     program_code=program_code,
                     check_df=check_df,
                     chat_history=(
-                        st.session_state.chat_history[:-1]
+                        st.session_state.chat_history[:-1][-5:]
+                    ),
+                    extra_context=_build_chat_extra_context(
+                        selected_code=program_code,
+                        data_frame=raw_df,
                     ),
                 )
 
@@ -5770,3 +5881,5 @@ if question:
             "content": answer,
         }
     )
+    # Persist at most five messages in Streamlit session memory.
+    st.session_state.chat_history = st.session_state.chat_history[-5:]

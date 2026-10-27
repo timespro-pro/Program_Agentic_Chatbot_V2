@@ -351,6 +351,9 @@ def ask_agent(
     chat_history:
         Optional[list] = None,
 
+    extra_context:
+        Optional[str] = None,
+
     stream_callback:
         Optional[
             Callable[
@@ -426,6 +429,9 @@ def ask_agent(
         "analysis_context":
             context,
 
+        "additional_data_sources":
+            (extra_context or "No additional cached report or Excel workbook context was available."),
+
         "recent_conversation":
             _history(
                 chat_history
@@ -441,9 +447,9 @@ def ask_agent(
 
             else
 
-            "Answer only the user's "
-            "specific question using "
-            "the supplied evidence."
+            "Answer only the user's specific question using the supplied evidence. "
+            "Use additional cached report and Excel workbook context when relevant. "
+            "Never invent figures; clearly say when the available sources do not contain the answer."
 
         ),
     }
