@@ -59,6 +59,12 @@ if "selected_old_batch" not in st.session_state:
 if "source_analysis_result" not in st.session_state:
     st.session_state.source_analysis_result = None
 
+if "source_popup_batches" not in st.session_state:
+    st.session_state.source_popup_batches = []
+
+if "source_popup_new_batch" not in st.session_state:
+    st.session_state.source_popup_new_batch = None
+
 
 # =========================================================
 # BACKGROUND IMAGE LOADER
@@ -4558,6 +4564,16 @@ def render_ai_diagnosis(
             """
         )
 
+        # Add the historical-batch source tables button directly under this section.
+        if "source-wise root-cause" in str(title).lower() or "source-wise analysis" in str(title).lower():
+            if st.session_state.get("source_popup_batches", []):
+                st.button(
+                    "Click here to view other batches",
+                    key="view_other_batch_source_tables",
+                    type="secondary",
+                    on_click=show_other_batch_source_tables,
+                )
+
 
 # =========================================================
 # LOAD DATA
@@ -5159,6 +5175,8 @@ if run_analysis:
         selected_old_for_analysis = list(dict.fromkeys(
             code for code in old_batch_codes if code in old_options
         ))[:3]
+        st.session_state.source_popup_batches = selected_old_for_analysis
+        st.session_state.source_popup_new_batch = program_code
         cache_key = make_cache_key(
             program_code=program_code,
             primary_data_path=primary_data_path,
@@ -5615,6 +5633,85 @@ if program_code and analysis_type not in {"Source analysis", "Batch Analysis", "
             program_code=program_code,
             old_batch_code=old_batch_code,
         )
+
+
+# =========================================================
+# SOURCE-WISE HISTORICAL BATCH POPUP
+# =========================================================
+
+def show_other_batch_source_tables():
+    """Show one source-wise table for each selected historical batch."""
+    @st.dialog("Source-wise analysis — other selected batches", width="large")
+    def _dialog():
+        batch_codes = st.session_state.get("source_popup_batches", [])[:3]
+        if not batch_codes:
+            st.info("No historical batches were selected.")
+            return
+
+        st.caption(
+            "Each table uses source-level data for that selected batch. "
+            "The New Batch source table remains in the main report."
+        )
+
+        def num_sum(series):
+            return pd.to_numeric(series, errors="coerce").sum(min_count=1)
+
+        def ratio(numerator, denominator):
+            if pd.isna(numerator) or pd.isna(denominator) or denominator == 0:
+                return None
+            return numerator / denominator * 100
+
+        for batch_code in batch_codes:
+            batch_rows = raw_df[
+                raw_df["program_code"].astype(str).str.strip().eq(str(batch_code).strip())
+            ].copy()
+            st.markdown(f"### {batch_code}")
+
+            if batch_rows.empty:
+                st.info(f"No source-level rows were found for {batch_code}.")
+                continue
+            if "source_created" not in batch_rows.columns:
+                st.warning("Source column `source_created` is not available in this dataset.")
+                continue
+
+            records = []
+            for source, group in batch_rows.groupby("source_created", dropna=False):
+                leads = num_sum(group["leads"]) if "leads" in group else None
+                warm = num_sum(group["warm_leads"]) if "warm_leads" in group else None
+                apps = num_sum(group["applications"]) if "applications" in group else None
+                enrollments = num_sum(group["enrollments"]) if "enrollments" in group else None
+                spend = num_sum(group["spends"]) if "spends" in group else None
+                records.append({
+                    "Source": str(source) if pd.notna(source) else "Unknown",
+                    "Leads": leads,
+                    "Warm leads": warm,
+                    "Applications": apps,
+                    "Enrollments": enrollments,
+                    "L2W": ratio(warm, leads),
+                    "L2A": ratio(apps, leads),
+                    "W2A": ratio(apps, warm),
+                    "L2E": ratio(enrollments, leads),
+                    "A2E": ratio(enrollments, apps),
+                    "Observed spend": spend,
+                    "CPL": spend / leads if pd.notna(spend) and pd.notna(leads) and leads else None,
+                    "CAC": spend / enrollments if pd.notna(spend) and pd.notna(enrollments) and enrollments else None,
+                })
+
+            table = pd.DataFrame(records)
+            if table.empty:
+                st.info(f"No source rows are available for {batch_code}.")
+                continue
+
+            table = table.sort_values("Enrollments", ascending=False, na_position="last")
+            for column in ["L2W", "L2A", "W2A", "L2E", "A2E"]:
+                table[column] = table[column].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+            for column in ["Observed spend", "CPL", "CAC"]:
+                table[column] = table[column].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
+            for column in ["Leads", "Warm leads", "Applications", "Enrollments"]:
+                table[column] = table[column].map(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A")
+            st.dataframe(table, width="stretch", hide_index=True)
+
+    _dialog()
 
 
 # =========================================================
