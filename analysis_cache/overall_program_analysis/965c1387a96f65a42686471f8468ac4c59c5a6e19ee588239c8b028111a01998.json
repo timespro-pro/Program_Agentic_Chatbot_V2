@@ -1,0 +1,11 @@
+{
+  "cache_key": "965c1387a96f65a42686471f8468ac4c59c5a6e19ee588239c8b028111a01998",
+  "schema_version": "overall-program-analysis-v1",
+  "created_at_utc": "2026-10-28T06:03:13Z",
+  "report": "Facebook drove 2,791 leads but showed the largest funnel leakage, with 18.95% L2W, 0.43% L2A, 9 enrollments, and the highest reported CAC of 124,973.44. Referral and website were strongest on conversion at 26.09% and 11.86% L2E respectively, while database’s 92.93% L2W fell to 3.70% W2A; Google led paid sources with 20 enrollments, 3.48% L2E, and 53,098.85 CAC. Spend was available for only 3 of 8 sources, so cost efficiency cannot be assessed for Others, affiliate, database, referral, or website.",
+  "metadata": {
+    "analysis_type": "Source-wise batch narrative",
+    "program_code": "IIMK_PCPF_09",
+    "prompt_version": "source-wise-batch-narrative-v1-2to3-lines"
+  }
+}
