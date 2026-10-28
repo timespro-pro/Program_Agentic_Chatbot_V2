@@ -1,0 +1,11 @@
+{
+  "cache_key": "b869bbc8d2323219c3e2ac537c0b291e52c90631ec5b404845a66e3b6670217f",
+  "schema_version": "overall-program-analysis-v1",
+  "created_at_utc": "2026-10-28T06:03:20Z",
+  "report": "Facebook drove the most volume (2,880 leads) but showed substantial lead-to-application leakage at 0.87% L2A, yielding 23 enrollments and a CAC of 47,966.74. Google converted more strongly at 3.13% L2A and 94.12% A2E, but had the highest observed CAC at 74,456.50; database also showed warm-to-application leakage, with 370 warm leads but only 12 applications (3.24% W2A). Referral, affiliate, and website posted 100% A2E but on only 2, 3, and 5 applications respectively, while cost comparisons are limited because spend is available for just 3 of 8 sources.",
+  "metadata": {
+    "analysis_type": "Source-wise batch narrative",
+    "program_code": "IIMK_PCPF_08",
+    "prompt_version": "source-wise-batch-narrative-v1-2to3-lines"
+  }
+}
