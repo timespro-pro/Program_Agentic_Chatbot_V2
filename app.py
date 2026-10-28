@@ -12,7 +12,7 @@ from openai import OpenAI
 from agent import ask_agent
 from source_analysis import analyze_sources, format_source_analysis_markdown
 from batch_analysis import analyze_batch_history, format_batch_analysis_markdown
-from overall_program_analysis import build_overall_program_analysis, format_overall_program_fallback
+from overall_program_analysis import build_overall_program_analysis, format_overall_program_fallback, build_section_performance_statuses
 from analysis_cache import make_cache_key, get_cached_report, get_cache_diagnostic, put_cached_report, get_process_lock, cache_is_configured
 
 from analysis_engine import (
@@ -2992,6 +2992,49 @@ st.html(
 )
 
 # =========================================================
+# SECTION PERFORMANCE VERDICTS
+# =========================================================
+
+def add_section_performance_statuses(report_text, statuses):
+    """Insert a compact status line after each matching report heading."""
+    if not report_text or not statuses:
+        return report_text
+
+    aliases = {
+        "Plan vs Actual": ["planned versus actual", "plan vs actual", "planned vs actual"],
+        "Volume and commercial outcomes": ["3.1 volume and commercial outcomes", "volume and commercial outcomes"],
+        "Conversion and acquisition efficiency": ["3.2 conversion and acquisition efficiency", "conversion and acquisition efficiency"],
+        "Source-wise root-cause analysis": ["source-wise root-cause analysis", "source-wise root cause analysis"],
+        "Advisor-tenure mix": ["advisor tenure mix", "advisor-tenure mix"],
+    }
+    emoji = {"GOOD": "🟢", "BAD": "🔴", "MIXED": "🟠"}
+    lines = report_text.splitlines()
+    output = []
+    inserted = set()
+    for line in lines:
+        output.append(line)
+        heading = re.sub(r"^#{1,6}\s*", "", line).strip().lower()
+        if not line.lstrip().startswith("#"):
+            continue
+        for label, variants in aliases.items():
+            if label in inserted or label not in statuses:
+                continue
+            if any(v in heading for v in variants):
+                item = statuses[label]
+                status = str(item.get("status", "MIXED")).upper()
+                if status not in emoji:
+                    status = "MIXED"
+                reason = str(item.get("reason", "")).strip()
+                output.append("")
+                output.append(f"**Performance Status: {emoji[status]} {status}**")
+                if reason:
+                    output.append(f"*Assessment basis: {reason}*")
+                inserted.add(label)
+                break
+    return "\n".join(output)
+
+
+# =========================================================
 # HTML RENDER HELPER
 # =========================================================
 
@@ -5181,7 +5224,7 @@ if run_analysis:
             program_code=program_code,
             primary_data_path=primary_data_path,
             advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-prompt-v4-selected-batches-up-to-four",
+            prompt_version="overall-program-prompt-v5-performance-status-labels-selected-batches-up-to-four",
             selected_old_batches=selected_old_for_analysis,
         )
 
@@ -5294,6 +5337,8 @@ EVIDENCE JSON:
                             answer = format_overall_program_fallback(overall_result)
 
                         answer = answer or format_overall_program_fallback(overall_result)
+                        section_statuses = build_section_performance_statuses(overall_result)
+                        answer = add_section_performance_statuses(answer, section_statuses)
                         compared_batches = [
                             x.get("program_code") for x in overall_result.get("batches", [])
                         ]
