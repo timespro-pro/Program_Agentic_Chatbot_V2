@@ -1,0 +1,11 @@
+{
+  "cache_key": "4d4c7690372aa5adf2004371c8a84c05697365959a5aff9fbafcd33e594460e1",
+  "schema_version": "overall-program-analysis-v1",
+  "created_at_utc": "2026-10-28T06:03:28Z",
+  "report": "Facebook generated the most leads (2,474) but showed the largest downstream leakage, with 25.46% L2W, 0.93% L2A, 16 enrollments, and a ₹60,231.81 CAC; Google delivered 22 enrollments from 565 leads at 3.89% L2E and ₹51,249.77 CAC. Others was strongest at meaningful scale with 18 enrollments from 201 leads and 8.96% L2E, while database converted 382 warm leads into only 12 applications (3.14% W2A); referral and website reached 100% A2E but on just 4 and 7 applications. Spend is available for only 3 of 8 sources (₹2,259,426 observed), so cost efficiency cannot be compared across all sources.",
+  "metadata": {
+    "analysis_type": "Source-wise batch narrative",
+    "program_code": "IIMK_PCPF_07",
+    "prompt_version": "source-wise-batch-narrative-v1-2to3-lines"
+  }
+}
