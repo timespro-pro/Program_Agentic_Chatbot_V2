@@ -1,0 +1,11 @@
+{
+  "cache_key": "53e2ea12ca4ec76c32347e23d510c812782fdf0a02ec501491b81ba5886d7d97",
+  "schema_version": "overall-program-analysis-v1",
+  "created_at_utc": "2026-11-03T05:49:52Z",
+  "report": "Facebook is the highest-impact priority: it supplies 60.91% of leads but only 19.28% of enrollments, with 0.65% L2E, A2E as its weakest stage, and a 34.55 estimated enrollment gap; LinkedIn is a distant second at 1.17, with W2A weakest. Google is a relative strength, generating 26.51% of enrollments from 13.91% of leads at 3.89% L2E, while Others contributes 21.69% of enrollments from 4.95% of leads at 8.96% L2E. Spend comparisons are limited to 3 of 8 sources (37.5% coverage), and benchmark gaps are counterfactual prioritization estimates—not demonstrated causes or guaranteed recoverable enrollments.",
+  "metadata": {
+    "analysis_type": "Source-wise batch narrative",
+    "program_code": "IIMK_PCPF_07",
+    "prompt_version": "source-wise-batch-narrative-v2-impact-prioritization"
+  }
+}
