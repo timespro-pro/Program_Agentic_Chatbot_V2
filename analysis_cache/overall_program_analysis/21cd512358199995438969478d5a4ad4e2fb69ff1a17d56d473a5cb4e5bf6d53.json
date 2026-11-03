@@ -1,0 +1,11 @@
+{
+  "cache_key": "21cd512358199995438969478d5a4ad4e2fb69ff1a17d56d473a5cb4e5bf6d53",
+  "schema_version": "overall-program-analysis-v1",
+  "created_at_utc": "2026-11-03T05:49:39Z",
+  "report": "Facebook is the top priority, with a 34.65 estimated enrollment gap, 60.62% of leads but only 12.50% of enrollments, and L2W as its weakest stage at 18.95%; LinkedIn follows with a 3.26 gap and A2E weakest at 57.14%. Google is the strongest scaled source, generating 27.78% of enrollments from 12.47% of leads with 3.48% L2E, while low-volume Others generated 16.67% of enrollments from 2.95% of leads. These benchmark gaps are counterfactual prioritization estimates—not demonstrated causes or guaranteed recoverable enrollments—and cost comparisons are limited because spend is available for only 3 of 8 sources (37.5%), with missing spend not assumed to be zero.",
+  "metadata": {
+    "analysis_type": "Source-wise batch narrative",
+    "program_code": "IIMK_PCPF_09",
+    "prompt_version": "source-wise-batch-narrative-v2-impact-prioritization"
+  }
+}
