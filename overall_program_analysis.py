@@ -101,7 +101,12 @@ def _batch_chain(df: pd.DataFrame, selected: str, max_previous: int = 2):
     return chain
 
 
-def _source_table(rows: pd.DataFrame):
+def _source_table(rows: pd.DataFrame, program_metrics: dict[str, Any] | None = None):
+    """Aggregate sources and add contribution, funnel, economics and impact diagnostics.
+
+    Impact estimates are counterfactual benchmarks against the program's own
+    blended conversion rates, not causal attribution or guaranteed recoverable volume.
+    """
     if "source_created" not in rows:
         return []
     work = rows.copy()
@@ -118,8 +123,49 @@ def _source_table(rows: pd.DataFrame):
             "L2W": _ratio(warm, leads), "L2A": _ratio(apps, leads), "L2E": _ratio(enrols, leads),
             "W2A": _ratio(apps, warm), "A2E": _ratio(enrols, apps),
             "spend_observed": spend, "CPL": _ratio(spend, leads), "CAC": _ratio(spend, enrols),
+            "spend_row_count": int(pd.to_numeric(g["spends"], errors="coerce").notna().sum()) if "spends" in g else 0,
+            "source_row_count": int(len(g)),
         })
-    return sorted(result, key=lambda x: (x["enrollments"] or 0), reverse=True)
+    totals = {
+        "leads": _sum(work, "leads"), "warm_leads": _sum(work, "warm_leads"),
+        "applications": _sum(work, "applications"), "enrollments": _sum(work, "enrollments"),
+    }
+    spend_sources = sum(1 for x in result if x["spend_observed"] is not None)
+    min_leads = max(10.0, (totals["leads"] or 0) * 0.03)
+    for item in result:
+        for metric in ["leads", "warm_leads", "applications", "enrollments"]:
+            denom = totals.get(metric)
+            item[f"{metric}_contribution_pct"] = (item.get(metric) / denom * 100) if item.get(metric) is not None and denom not in (None, 0) else None
+        item["eligible_for_conversion_ranking"] = bool(item.get("leads") is not None and item["leads"] >= min_leads)
+        # Locate the largest relative stage weakness against the program's blended funnel.
+        gaps = []
+        for label, key, numerator, denominator in [
+            ("Lead to warm", "L2W", "warm_leads", "leads"),
+            ("Warm to application", "W2A", "applications", "warm_leads"),
+            ("Application to enrollment", "A2E", "enrollments", "applications"),
+        ]:
+            own, benchmark = item.get(key), _ratio(totals.get(numerator), totals.get(denominator))
+            if own is not None and benchmark is not None:
+                gaps.append((label, own - benchmark))
+        item["largest_funnel_gap_stage"] = min(gaps, key=lambda x: x[1])[0] if gaps else None
+        item["largest_funnel_gap_pp"] = min(gaps, key=lambda x: x[1])[1] * 100 if gaps else None
+        # Counterfactual impact: expected enrollments at the program blended L2E.
+        benchmark_l2e = _ratio(totals["enrollments"], totals["leads"])
+        actual_e = item.get("enrollments")
+        leads_i = item.get("leads")
+        expected_e = leads_i * benchmark_l2e if leads_i is not None and benchmark_l2e is not None else None
+        item["benchmark_expected_enrollments"] = expected_e
+        item["enrollment_gap_vs_program_benchmark"] = max(0.0, expected_e - actual_e) if expected_e is not None and actual_e is not None else None
+        item["enrollment_gap_share_pct"] = None
+        item["impact_priority"] = "Not ranked"
+        if item["eligible_for_conversion_ranking"] and item["enrollment_gap_vs_program_benchmark"] is not None:
+            item["impact_priority"] = "High" if item["enrollment_gap_vs_program_benchmark"] >= 2 else ("Medium" if item["enrollment_gap_vs_program_benchmark"] >= 0.5 else "Low")
+        item["spend_coverage"] = "Available" if item.get("spend_observed") is not None else "Missing"
+    total_gap = sum(x["enrollment_gap_vs_program_benchmark"] or 0 for x in result)
+    for item in result:
+        gap = item.get("enrollment_gap_vs_program_benchmark")
+        item["enrollment_gap_share_pct"] = (gap / total_gap * 100) if gap is not None and total_gap > 0 else None
+    return sorted(result, key=lambda x: (x.get("enrollment_gap_vs_program_benchmark") or 0, x.get("enrollments") or 0), reverse=True)
 
 
 def _advisor_table(advisor_df: pd.DataFrame | None, batch: str):
@@ -184,7 +230,7 @@ def build_overall_program_analysis(raw_df: pd.DataFrame, program_code: str,
             "program_code": code,
             "is_selected_batch": code == str(program_code),
             "metrics": metrics,
-            "source_performance": _source_table(rows) if code == str(program_code) else [],
+            "source_performance": _source_table(rows, metrics) if code == str(program_code) else [],
             "advisor_tenure_mix": _advisor_table(advisor_df, code),
         })
 
@@ -299,11 +345,19 @@ def format_overall_program_fallback(result: dict[str, Any]) -> str:
             cells.extend([trend_marker(key, delta) + change, fmt(old_m.get(key), is_rate)])
         while len(cells) < 6: cells.extend(["N/A", "N/A"])
         lines.append("| " + " | ".join(cells[:6]) + " |")
-    lines += ["## Source-wise root cause (3–4 line summary)", "See source scorecard below; prioritize sources with adequate lead volume but lower L2A, then inspect L2W and W2A to locate the funnel drop.", 
-              "| Source | Leads | Warm | Apps | Enrols | L2W | L2A | W2A | A2E | CPL | CAC |",
-              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
-    for s in current.get("source_performance", []):
-        lines.append("| " + " | ".join([s["source"]] + [fmt(s.get(k), k in {"L2W","L2A","L2E","W2A","A2E"}) for k in ["leads","warm_leads","applications","enrollments","L2W","L2A","W2A","A2E","CPL","CAC"]]) + " |")
+    source_rows = current.get("source_performance", [])
+    lines += ["## Source-wise root-cause analysis",
+              "The source scorecard separates scale, conversion, and observed-spend economics. Contribution percentages show each source's share of the program total; conversion rankings use a minimum volume threshold of max(10 leads, 3% of program leads).",
+              "Impact priority is based on the estimated enrollment gap versus the program's blended lead-to-enrollment rate. This is a counterfactual prioritization aid, not proof of causality or guaranteed recoverable enrollments.",
+              "| Source | Leads | Lead share | App share | Enrol share | L2W | L2A | W2A | A2E | Weakest stage vs program | Enrol gap vs benchmark | Impact priority | Spend coverage | CPL | CAC |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---|---:|---:|"]
+    for source in source_rows:
+        cells = [source.get("source", "N/A"), fmt(source.get("leads")), fmt(source.get("leads_contribution_pct")),
+                 fmt(source.get("applications_contribution_pct")), fmt(source.get("enrollments_contribution_pct")),
+                 fmt(source.get("L2W"), True), fmt(source.get("L2A"), True), fmt(source.get("W2A"), True), fmt(source.get("A2E"), True),
+                 source.get("largest_funnel_gap_stage") or "N/A", fmt(source.get("enrollment_gap_vs_program_benchmark")),
+                 source.get("impact_priority", "N/A"), source.get("spend_coverage", "N/A"), fmt(source.get("CPL")), fmt(source.get("CAC"))]
+        lines.append("| " + " | ".join(map(str, cells)) + " |")
     if current.get("advisor_tenure_mix"):
         lines += ["## Advisor tenure mix (ranked by L2W and L2E)", "| Tenure | Leads | Warm | Apps | Enrols | L2W | L2E | Priority score |",
                   "|---|---:|---:|---:|---:|---:|---:|---:|"]

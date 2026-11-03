@@ -5224,7 +5224,7 @@ if run_analysis:
             program_code=program_code,
             primary_data_path=primary_data_path,
             advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-prompt-v5-performance-status-labels-selected-batches-up-to-four",
+            prompt_version="overall-program-prompt-v6-source-impact-prioritization-performance-status-labels",
             selected_old_batches=selected_old_for_analysis,
         )
 
@@ -5275,7 +5275,7 @@ Immediately after section 1, add a new section titled “Where it went wrong”.
    - “3.1 Volume and commercial outcomes”: leads, warm leads, applications, enrollments, program fee, Actual GSV.
    - “3.2 Conversion and acquisition efficiency”: L2W, L2A, L2E, W2A, A2E, CPL, CAC.
    Compare the current batch with every selected Old Batch in the evidence (up to three old batches, four total). Include each selected batch as its own value column and comparison. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
-4. “Source-wise root-cause analysis”: provide a concise 3–5 line interpretation followed by a source table. Identify strongest/weakest sources only when supported by adequate data. If lead volume is not the issue but L2A declines, inspect L2W and W2A to locate the funnel leakage. Separate observations from hypotheses and disclose incomplete spend coverage.
+4. “Source-wise root-cause analysis”: provide a concise executive diagnosis followed by a source table that includes lead/application/enrollment contribution shares, funnel conversion rates, weakest stage versus the program blended benchmark, estimated enrollment gap versus the program blended L2E benchmark, impact priority, spend coverage, observed CPL and observed CAC. Use the supplied Python-computed impact estimates; do not recalculate them. Conversion ranking eligibility uses max(10 leads, 3% of program leads). Prioritize sources by estimated business impact, not merely lowest conversion. Explain that enrollment-gap estimates are counterfactual benchmarks, not causal attribution or guaranteed recoverable enrollments. Separate observed facts from hypotheses, and disclose incomplete spend coverage. Discuss volume contribution, conversion efficiency, commercial efficiency, and impact prioritization.
 5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation. Add a brief 1–2 sentence experience interpretation directly under this section: lower tenure-month values mean more experienced advisors, while higher tenure-month values mean less experienced advisors. Relate the observed performance of the tenure groups to this experience scale only where the table supports it; do not infer causation.
 6. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
 
@@ -5765,6 +5765,31 @@ def show_other_batch_source_tables():
             overall_w2a = ratio(total_apps, total_warm)
             spend_coverage = int(table["Observed spend"].notna().sum())
             source_count = len(table)
+            # Contribution and impact calculations are deterministic Python outputs.
+            for metric_col, share_col in [("Leads", "Lead share"), ("Applications", "Application share"), ("Enrollments", "Enrollment share")]:
+                denom = num_sum(table[metric_col])
+                table[share_col] = (table[metric_col] / denom * 100) if pd.notna(denom) and denom != 0 else None
+            min_leads_for_rank = max(10.0, (float(total_leads) if pd.notna(total_leads) else 0.0) * 0.03)
+            table["Ranking eligible"] = table["Leads"].ge(min_leads_for_rank)
+            benchmark_l2e = (total_enrollments / total_leads) if pd.notna(total_enrollments) and pd.notna(total_leads) and total_leads else None
+            table["Expected enrolments at program L2E"] = table["Leads"] * benchmark_l2e if benchmark_l2e is not None else None
+            table["Enrolment gap vs benchmark"] = (table["Expected enrolments at program L2E"] - table["Enrollments"]).clip(lower=0) if benchmark_l2e is not None else None
+            total_positive_gap = table["Enrolment gap vs benchmark"].sum(min_count=1)
+            table["Share of estimated gap"] = table["Enrolment gap vs benchmark"] / total_positive_gap * 100 if pd.notna(total_positive_gap) and total_positive_gap > 0 else None
+            table["Impact priority"] = table["Enrolment gap vs benchmark"].apply(lambda x: "High" if pd.notna(x) and x >= 2 else ("Medium" if pd.notna(x) and x >= 0.5 else ("Low" if pd.notna(x) else "N/A")))
+            table.loc[~table["Ranking eligible"], "Impact priority"] = "Not ranked (low volume)"
+            table["Spend coverage"] = table["Observed spend"].apply(lambda x: "Available" if pd.notna(x) else "Missing")
+            program_rates = {"L2W": ratio(total_warm, total_leads), "L2A": overall_l2a, "W2A": overall_w2a,
+                             "A2E": ratio(total_enrollments, total_apps)}
+            def weakest_stage(row):
+                gaps = []
+                for stage, col, denominator in [("L2W", "L2W", "Leads"), ("W2A", "W2A", "Warm leads"), ("A2E", "A2E", "Applications")]:
+                    own = row.get(col)
+                    benchmark = program_rates.get(stage)
+                    if pd.notna(own) and benchmark is not None:
+                        gaps.append((stage, float(own) - float(benchmark)))
+                return min(gaps, key=lambda item: item[1])[0] if gaps else "N/A"
+            table["Weakest stage vs program"] = table.apply(weakest_stage, axis=1)
 
             lead_source = table.loc[table["Leads"].fillna(0).idxmax()] if source_count else None
             enrollment_source = table.loc[table["Enrollments"].fillna(0).idxmax()] if source_count else None
@@ -5791,13 +5816,20 @@ def show_other_batch_source_tables():
                     "observed_spend": None if pd.isna(row["Observed spend"]) else round(float(row["Observed spend"]), 2),
                     "CPL": None if pd.isna(row["CPL"]) else round(float(row["CPL"]), 2),
                     "CAC": None if pd.isna(row["CAC"]) else round(float(row["CAC"]), 2),
+                    "lead_share_pct": None if pd.isna(row["Lead share"]) else round(float(row["Lead share"]), 2),
+                    "application_share_pct": None if pd.isna(row["Application share"]) else round(float(row["Application share"]), 2),
+                    "enrollment_share_pct": None if pd.isna(row["Enrollment share"]) else round(float(row["Enrollment share"]), 2),
+                    "weakest_stage_vs_program": row["Weakest stage vs program"],
+                    "estimated_enrollment_gap_vs_program_L2E": None if pd.isna(row["Enrolment gap vs benchmark"]) else round(float(row["Enrolment gap vs benchmark"]), 2),
+                    "impact_priority": row["Impact priority"],
+                    "spend_coverage": row["Spend coverage"],
                 })
 
             narrative_key = make_cache_key(
                 program_code=str(batch_code),
                 primary_data_path=APP_DIR / "data" / "Program Batch Data.csv",
                 advisor_data_path=APP_DIR / "data" / "Advisor Mix.csv",
-                prompt_version="source-wise-batch-narrative-v1-2to3-lines",
+                prompt_version="source-wise-batch-narrative-v2-impact-prioritization",
                 selected_old_batches=[],
             )
             narrative = None
@@ -5826,6 +5858,8 @@ def show_other_batch_source_tables():
                                 "observed_spend_sum_of_available_sources": None if pd.isna(total_spend) else round(float(total_spend), 2),
                                 "sources_with_spend": spend_coverage,
                                 "source_count": source_count,
+                                "spend_coverage_pct": round(spend_coverage / source_count * 100, 2) if source_count else None,
+                                "impact_method": "max(0, source leads × program blended L2E − source enrollments); counterfactual prioritization only",
                             },
                             "source_metrics": source_evidence,
                         }
@@ -5835,8 +5869,9 @@ def show_other_batch_source_tables():
                                 "You are a senior marketing performance analyst. Write exactly 2-3 concise "
                                 "sentences for the source-wise root-cause analysis of this batch. Use only the "
                                 "provided computed evidence. Identify meaningful source-level strengths and "
-                                "weaknesses, lead-to-application/enrollment leakage, and spend-data limitations "
-                                "where relevant. Cite specific source names and numbers from the payload. "
+                                "weaknesses, contribution shares, weakest funnel stages, impact priorities, and spend-data limitations "
+                                "where relevant. Prioritize sources by estimated enrollment gap rather than lowest rate alone. "
+                                "Explain that benchmark gaps are counterfactual, not causal or guaranteed recoverable. Cite specific source names and numbers from the payload. "
                                 "Do not recalculate metrics, invent targets, claim causes not demonstrated by "
                                 "the data, or imply missing spend is zero. Distinguish observations from hypotheses. "
                                 "Return only the 2-3 sentence paragraph, no heading or bullets."
@@ -5851,7 +5886,7 @@ def show_other_batch_source_tables():
                                 metadata={
                                     "analysis_type": "Source-wise batch narrative",
                                     "program_code": str(batch_code),
-                                    "prompt_version": "source-wise-batch-narrative-v1-2to3-lines",
+                                    "prompt_version": "source-wise-batch-narrative-v2-impact-prioritization",
                                 },
                             )
             except Exception:
@@ -5866,11 +5901,15 @@ def show_other_batch_source_tables():
                     "The source metrics below are still calculated directly from the data."
                 )
 
-            table = table.sort_values("Enrollments", ascending=False, na_position="last")
+            table = table.sort_values("Enrolment gap vs benchmark", ascending=False, na_position="last")
             for column in ["L2W", "L2A", "W2A", "L2E", "A2E"]:
                 table[column] = table[column].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
             for column in ["Observed spend", "CPL", "CAC"]:
                 table[column] = table[column].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
+            for column in ["Lead share", "Application share", "Enrollment share", "Share of estimated gap"]:
+                table[column] = table[column].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+            for column in ["Expected enrolments at program L2E", "Enrolment gap vs benchmark"]:
+                table[column] = table[column].map(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
             for column in ["Leads", "Warm leads", "Applications", "Enrollments"]:
                 table[column] = table[column].map(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A")
             st.dataframe(table, width="stretch", hide_index=True)
