@@ -44,7 +44,13 @@ batch is performing better or worse than an old batch.
 
 Python has already calculated the numerical metrics.
 
-Do NOT recalculate them.
+For the precomputed formal report metrics, do NOT recalculate them.
+For a user's ad-hoc chatbot question that asks for a calculation or analysis
+not already present in the supplied metrics, you MAY calculate it directly
+from the complete_source_data_context rows. State the exact filters, row
+scope, formula, and any exclusions. If the supplied source data is marked
+as truncated or incomplete, disclose that limitation and do not present
+results as covering the full dataset.
 
 Do NOT invent numbers.
 
@@ -59,50 +65,59 @@ REPORT STRUCTURE
 {chr(10).join(REPORT_SECTIONS)}
 
 =========================================================
-RESPONSE STYLE: CHAT VS FULL REPORT
+STAKEHOLDER REPORT STYLE
 =========================================================
 
-This agent serves two different purposes. Choose the response style
-based on the user's current question.
+The output should look like a professional
+business-performance analysis.
 
-A) NORMAL CHAT / FOLLOW-UP QUESTION (DEFAULT):
-Write like a helpful, sharp human analyst in a chat conversation.
-Start with a direct answer in a natural paragraph. Use the most
-relevant figures from the supplied evidence as proof, then add only
-2-4 short bullets if they make the answer clearer. Usually keep the
-answer to one short paragraph plus a few bullets (roughly 100-180
-words; shorter is better when possible).
+Use:
 
-For normal chat:
-- Do NOT generate a full report.
-- Do NOT use report headings such as "Key Metrics Overview",
-  "Identified Issues", "Summary of Analysis", or "Recommendations".
-- Do NOT repeat all metrics or summarize the whole program unless asked.
-- Do NOT create a long numbered list, multiple report sections, or a
-  large table.
-- Answer the exact question first, then explain the evidence briefly.
-- Mention specific batch names and values when available.
-- Explain percentage-point changes correctly for conversion rates.
-- Distinguish observed facts from possible explanations.
-- End with one practical next step only when useful.
-- For "Is the issue conversion, volume, CPL, CAC?", give a concise
-  judgement across those dimensions backed by key values, not a full report.
-- Only use a table if the user explicitly asks for one or it is necessary.
+- concise sections
+- tables where useful
+- numerical comparisons
+- percentage changes
+- percentage-point changes for conversion
+- clear red-flag areas
+- specific Finance actions
+- specific Marketing actions
 
-B) FULL REPORT:
-Use the full stakeholder report structure only when the user explicitly
-requests a full/comprehensive analysis, a performance report, or asks to
-generate the analysis. In that case, follow the required section order
-and provide the appropriate detail.
+Avoid:
 
-For either style:
-- Use numerical comparisons and percentage-point changes for rates.
-- Never invent figures or causes.
-- Avoid generic business language and repeating the same point.
-- Higher spend is not automatically bad; assess it against output, CPL,
-  CAC and conversion.
-- Examine Leads -> Applications -> Enrollments, Spend -> CPL -> CAC,
-  and source-level evidence where available.
+- generic business language
+- excessive narrative
+- repeating the same point
+- unsupported assumptions
+- long introductions
+
+The key question is:
+
+WHERE DID THE NEW BATCH FALL OFF
+COMPARED WITH THE OLD BATCH?
+
+Follow the funnel:
+
+Leads
+↓
+Applications
+↓
+Enrollments
+
+Then examine:
+
+Spend
+↓
+CPL
+↓
+CAC
+
+Then:
+
+Source
+↓
+Funnel
+↓
+Program
 
 =========================================================
 FACT VS HYPOTHESIS
@@ -342,8 +357,7 @@ def ask_agent(
     chat_history:
         Optional[list] = None,
 
-    extra_context:
-        Optional[str] = None,
+    extra_context: Optional[str] = None,
 
     stream_callback:
         Optional[
@@ -420,8 +434,8 @@ def ask_agent(
         "analysis_context":
             context,
 
-        "additional_data_sources":
-            (extra_context or "No additional cached report or Excel workbook context was available."),
+        "complete_source_data_context":
+            (extra_context or "No additional source-data sheets were supplied."),
 
         "recent_conversation":
             _history(
@@ -429,18 +443,26 @@ def ask_agent(
             ),
 
         "instruction": (
-            "The user explicitly wants a full analysis/report. Produce the complete "
-            "stakeholder report using the required section order."
+
+            "Produce the complete "
+            "stakeholder report using "
+            "the required section order."
+
             if full_report
+
             else
-            "This is a normal chat reply, not a report. Answer the exact question directly "
-            "in a natural conversational paragraph, then use at most 2-4 brief bullets if "
-            "helpful. Aim for 100-180 words maximum, usually shorter. Do not add report "
-            "headings, a full metrics overview, a long identified-issues list, a summary "
-            "section, or a recommendations section. Support the answer with a few specific "
-            "numbers from the supplied evidence. Use cached report and Excel context when "
-            "relevant. Never invent figures; say plainly if the available sources do not "
-            "contain the answer."
+
+            "Answer only the user's "
+            "specific question using "
+            "the supplied evidence. "
+            "Use complete_source_data_context as additional evidence. "
+            "It contains the available source CSV/Excel sheets, including "
+            "their sheet names, columns, and row data. Search across all "
+            "provided rows when answering. Do not claim to have reviewed "
+            "data that is explicitly marked as omitted or unavailable. "
+            "For calculations, calculate from the supplied rows and state "
+            "the formula and scope; do not invent missing values."
+
         ),
     }
 

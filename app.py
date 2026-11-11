@@ -5971,50 +5971,70 @@ render_optimal_launch_metrics(
 # =========================================================
 
 def _chat_dataframe_context(frame: pd.DataFrame, label: str, selected_code: str | None = None,
-                            max_rows: int = 35) -> str:
-    """Build a compact, grounded context block from a dataframe."""
+                            max_rows: int | None = None) -> str:
+    """Serialize all available rows from a source sheet for grounded chat analysis.
+
+    When a program_code column exists, prioritize the selected program while retaining
+    the complete sheet in context if it is small enough. No silent row sampling occurs.
+    """
     if frame is None or frame.empty:
-        return f"Source: {label}\nNo rows available."
+        return f"Source sheet: {label}\nNo rows available."
     view = frame.copy()
+    scope_note = "Complete sheet"
     if selected_code and "program_code" in view.columns:
         match = view["program_code"].astype(str).str.strip().eq(str(selected_code).strip())
         if match.any():
             view = view.loc[match]
-    view = view.head(max_rows)
+            scope_note = f"Filtered to selected program_code={selected_code}"
+        else:
+            scope_note = (f"No rows matched selected program_code={selected_code}; "
+                          "showing complete sheet")
     try:
         table = view.to_csv(index=False)
     except Exception:
         table = view.astype(str).to_string(index=False)
-    if len(table) > 14000:
-        table = table[:14000] + "\n[truncated for context length]"
     return (
-        f"Source: {label}\n"
-        f"Rows in loaded source: {len(frame)}; rows provided below: {len(view)}\n"
+        f"Source sheet: {label}\n"
+        f"Scope: {scope_note}\n"
+        f"Rows supplied: {len(view)} of {len(frame)} loaded rows\n"
         f"Columns: {', '.join(map(str, frame.columns))}\n"
-        f"Data (CSV format):\n{table}"
+        f"Complete row data (CSV format):\n{table}"
     )
 
 
-def _load_excel_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
-    """Read any .xlsx/.xls workbooks placed in data/ and expose their sheets to chat."""
+def _load_source_sheet_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
+    """Load every CSV and every sheet in Excel workbooks under data/."""
     blocks = []
     if not data_dir.exists():
-        return "No data directory found for Excel workbooks."
-    paths = sorted(list(data_dir.glob("*.xlsx")) + list(data_dir.glob("*.xls")))
-    if not paths:
-        return "No .xlsx or .xls workbooks found in the app data/ directory."
-    for path in paths:
+        return "No data directory found; source sheets are unavailable."
+    supported = sorted(
+        list(data_dir.glob("*.csv")) + list(data_dir.glob("*.xlsx")) + list(data_dir.glob("*.xls"))
+    )
+    if not supported:
+        return "No CSV or Excel source sheets found in the app data/ directory."
+    for path in supported:
         try:
-            workbook = pd.ExcelFile(path)
-            for sheet_name in workbook.sheet_names:
-                frame = pd.read_excel(path, sheet_name=sheet_name)
+            if path.suffix.lower() == ".csv":
+                frame = pd.read_csv(path, low_memory=False)
                 blocks.append(_chat_dataframe_context(
-                    frame, f"Excel workbook {path.name} | sheet {sheet_name}",
-                    selected_code=selected_code, max_rows=30
+                    frame, f"CSV file {path.name}", selected_code=selected_code
                 ))
+            else:
+                workbook = pd.ExcelFile(path)
+                for sheet_name in workbook.sheet_names:
+                    frame = pd.read_excel(path, sheet_name=sheet_name)
+                    blocks.append(_chat_dataframe_context(
+                        frame, f"Excel workbook {path.name} | sheet {sheet_name}",
+                        selected_code=selected_code
+                    ))
         except Exception as exc:
-            blocks.append(f"Source: Excel workbook {path.name}\nCould not read workbook: {exc}")
-    return "\n\n".join(blocks)
+            blocks.append(f"Source file: {path.name}\nCould not read source: {exc}")
+    return "\n\n--- NEXT SOURCE SHEET ---\n\n".join(blocks)
+
+
+def _load_excel_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
+    """Backward-compatible alias for the complete source-sheet loader."""
+    return _load_source_sheet_chat_context(data_dir, selected_code)
 
 
 def _get_chat_cached_report(selected_code: str | None) -> str:
@@ -6053,19 +6073,19 @@ def _get_chat_cached_report(selected_code: str | None) -> str:
 
 
 def _build_chat_extra_context(selected_code: str | None, data_frame: pd.DataFrame) -> str:
-    parts = []
-    parts.append(_get_chat_cached_report(selected_code))
-    parts.append(_chat_dataframe_context(
-        data_frame, "Program Batch Data.csv", selected_code=selected_code, max_rows=35
-    ))
-    try:
-        parts.append(_chat_dataframe_context(
-            advisor_df, "Advisor Mix.csv", selected_code=selected_code, max_rows=30
-        ))
-    except Exception:
-        pass
-    parts.append(_load_excel_chat_context(APP_DIR / "data", selected_code=selected_code))
-    return "\n\n--- SOURCE SEPARATOR ---\n\n".join(parts)
+    parts = [
+        _get_chat_cached_report(selected_code),
+        _load_source_sheet_chat_context(APP_DIR / "data", selected_code=selected_code),
+    ]
+    # Explicitly disclose context size; do not silently pretend truncated data was complete.
+    combined = "\n\n--- SOURCE SEPARATOR ---\n\n".join(parts)
+    max_chars = 180000
+    if len(combined) > max_chars:
+        combined = combined[:max_chars]
+        combined += ("\n\n[CONTEXT LIMIT: Additional source-sheet content was omitted "
+                     "to fit the model request. The assistant must disclose this limitation "
+                     "and must not claim the omitted rows were analyzed.]" )
+    return combined
 
 
 # =========================================================
