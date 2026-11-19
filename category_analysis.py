@@ -52,9 +52,18 @@ def prepare_programs(raw: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         d[c] = _numeric(d[c])
     # Keep first non-null program attribute. The uploaded data was checked: each of
     # these attributes has at most one distinct non-null value per program_code.
+    # Paid metrics and planned-paid fields are program-level snapshots repeated on
+    # each source row. Retain one non-null value; never sum these across sources.
+    snapshot_cols = [c for c in [
+        "paid_leads", "paid_enrollments", "paid_gsv_cr", "paid_spends",
+        "planned_paid_leads", "planned_paid_enrollments", "planned_paid_gsv", "planned_paid_spends",
+    ] if c in d]
     agg: dict[str, Any] = {c: "first" for c in ATTRS if c in d}
     agg.update({c: (lambda x: x.sum(min_count=1)) for c in metric_cols})
+    agg.update({c: (lambda x: x.dropna().iloc[0] if x.notna().any() else np.nan) for c in snapshot_cols})
     p = d.groupby("program_code", as_index=False, dropna=False).agg(agg)
+    for c in snapshot_cols:
+        p[c] = _numeric(p[c])
     for c in [x for x in ATTRS if x in p and x not in metric_cols]:
         p[c] = p[c].astype("string").str.strip().replace("", pd.NA)
     if "tech_management" in p:
@@ -453,141 +462,303 @@ Write an executive investigation brief with: (1) strongest supported discoveries
     return response.choices[0].message.content or "No interpretation returned."
 
 
-def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
-    st.markdown("## AI Category Intelligence")
-    st.caption("An investigation engine that discovers non-obvious patterns across categories, program mix, sources and previous batches.")
-    @st.cache_data(show_spinner="Scanning program patterns...")
-    def _cached_discovery(dataframe: pd.DataFrame):
-        return discover_patterns(dataframe)
 
-    result = _cached_discovery(raw_df)
-    programs, meta, findings, tables = result["programs"], result["meta"], result["findings"], result["tables"]
-    if programs.empty:
-        st.error("Cannot run category intelligence. Required columns: program_code and tech_management.")
+def _safe_ratio(num, den):
+    return np.where(pd.notna(den) & (den > 0) & pd.notna(num), num / den, np.nan)
+
+
+def _build_management_tables(programs: pd.DataFrame) -> dict:
+    """Create category and individual program-batch evidence tables."""
+    p = programs.copy()
+    for c in ["leads", "warm_leads", "applications", "enrollments", "gsv_cr",
+              "spends", "Planned_Budget", "Planned_Lead", "Planned_Application",
+              "Planned_Enrollment", "Planned_GSV"]:
+        if c in p:
+            p[c] = _numeric(p[c])
+    for n, den, label in [
+        ("warm_leads", "leads", "L2W"), ("applications", "leads", "L2A"),
+        ("applications", "warm_leads", "W2A"), ("enrollments", "applications", "A2E"),
+        ("enrollments", "leads", "L2E"),
+    ]:
+        if n in p and den in p:
+            p[label] = _safe_ratio(p[n], p[den])
+    if {"spends", "leads"}.issubset(p):
+        p["CPL"] = _safe_ratio(p.spends, p.leads)
+    if {"spends", "enrollments"}.issubset(p):
+        p["CAC"] = _safe_ratio(p.spends, p.enrollments)
+    if {"gsv_cr", "enrollments"}.issubset(p):
+        p["GSV_per_enrollment"] = _safe_ratio(p.gsv_cr, p.enrollments)
+
+    cat_rows = []
+    for cat, g in p.groupby("tech_management", dropna=False):
+        row = {
+            "tech_management": str(cat), "programs": g.program_code.nunique(),
+            "leads": g.leads.sum(min_count=1), "warm_leads": g.warm_leads.sum(min_count=1) if "warm_leads" in g else np.nan,
+            "applications": g.applications.sum(min_count=1), "enrollments": g.enrollments.sum(min_count=1),
+            "gsv_cr": g.gsv_cr.sum(min_count=1), "spends": g.spends.sum(min_count=1) if "spends" in g else np.nan,
+        }
+        row["L2W"] = row["warm_leads"] / row["leads"] if pd.notna(row["warm_leads"]) and pd.notna(row["leads"]) and row["leads"] > 0 else np.nan
+        row["L2A"] = row["applications"] / row["leads"] if pd.notna(row["applications"]) and pd.notna(row["leads"]) and row["leads"] > 0 else np.nan
+        row["W2A"] = row["applications"] / row["warm_leads"] if pd.notna(row["applications"]) and pd.notna(row["warm_leads"]) and row["warm_leads"] > 0 else np.nan
+        row["A2E"] = row["enrollments"] / row["applications"] if pd.notna(row["enrollments"]) and pd.notna(row["applications"]) and row["applications"] > 0 else np.nan
+        row["L2E"] = row["enrollments"] / row["leads"] if pd.notna(row["enrollments"]) and pd.notna(row["leads"]) and row["leads"] > 0 else np.nan
+        row["CPL"] = row["spends"] / row["leads"] if pd.notna(row["spends"]) and pd.notna(row["leads"]) and row["leads"] > 0 else np.nan
+        row["CAC"] = row["spends"] / row["enrollments"] if pd.notna(row["spends"]) and pd.notna(row["enrollments"]) and row["enrollments"] > 0 else np.nan
+        row["GSV_per_enrollment"] = row["gsv_cr"] / row["enrollments"] if pd.notna(row["gsv_cr"]) and pd.notna(row["enrollments"]) and row["enrollments"] > 0 else np.nan
+        for actual, plan, label in [
+            ("leads", "Planned_Lead", "Lead_plan_attainment"),
+            ("applications", "Planned_Application", "Application_plan_attainment"),
+            ("enrollments", "Planned_Enrollment", "Enrollment_plan_attainment"),
+            ("gsv_cr", "Planned_GSV", "GSV_plan_attainment"),
+            ("spends", "Planned_Budget", "Budget_utilization"),
+        ]:
+            if plan in g:
+                pv = g[plan].sum(min_count=1)
+                row[label] = row[actual] / pv if pd.notna(row[actual]) and pd.notna(pv) and pv > 0 else np.nan
+                row[label.replace("_attainment", "_plan").replace("_utilization", "_plan")] = pv
+        cat_rows.append(row)
+    categories = pd.DataFrame(cat_rows)
+    if not categories.empty:
+        categories["conversion_sample_status"] = np.where(
+            (categories["programs"] >= 8) & (categories["leads"] >= 1000),
+            "Sufficient for category conversion ranking",
+            "Small sample - interpret conversion cautiously",
+        )
+
+    # Each program_code is the individual program batch identifier.
+    batch_cols = [c for c in [
+        "program_code", "program_name", "tech_management", "category", "financial_year",
+        "program_batch_code", "batch_number", "New_Repeat", "institute_name_new",
+        "program_fee_bucket", "leads", "warm_leads", "applications", "enrollments",
+        "gsv_cr", "spends", "Planned_Lead", "Planned_Application", "Planned_Enrollment",
+        "Planned_GSV", "Planned_Budget", "L2W", "L2A", "W2A", "A2E", "L2E",
+        "CPL", "CAC", "GSV_per_enrollment",
+    ] if c in p]
+    batches = p[batch_cols].copy()
+    if "leads" not in batches:
+        batches["leads"] = np.nan
+
+    # Category-relative batch performance: require enough lead volume to reduce noise.
+    batches["category_l2e"] = batches.tech_management.map(categories.set_index("tech_management")["L2E"])
+    batches["l2e_gap_pp"] = (batches.L2E - batches.category_l2e) * 100
+    batches["batch_status"] = "Near category average"
+    for cat, idx in batches.groupby("tech_management").groups.items():
+        g = batches.loc[idx]
+        eligible = g[g.leads >= 30]
+        if len(eligible) < 4:
+            continue
+        q25 = eligible.L2E.quantile(.25)
+        q75 = eligible.L2E.quantile(.75)
+        batches.loc[idx, "batch_status"] = "Insufficient lead volume"
+        batches.loc[eligible.index, "batch_status"] = "Near category average"
+        batches.loc[eligible[eligible.L2E <= q25].index, "batch_status"] = "Underperforming"
+        batches.loc[eligible[eligible.L2E >= q75].index, "batch_status"] = "Top quartile"
+
+    # Explain stage-level gap against the category's top quartile and estimate scenarios.
+    diagnostics = []
+    for _, b in batches.iterrows():
+        cat = b.tech_management
+        if b.get("batch_status") != "Underperforming":
+            continue
+        peer = batches[(batches.tech_management == cat) & (batches.leads >= 30)]
+        if len(peer) < 4 or pd.isna(b.leads) or b.leads < 30:
+            continue
+        stage_q = {m: peer[m].quantile(.75) for m in ["L2W", "L2A", "A2E", "L2E"] if m in peer}
+        own = {m: b.get(m, np.nan) for m in stage_q}
+        gaps = {m: max(0.0, float(stage_q[m] - own[m])) for m in stage_q
+                if pd.notna(stage_q[m]) and pd.notna(own[m])}
+        # Diagnose largest stage gap in percentage points; L2E is an outcome, not added to stage opportunity.
+        actionable = {m: v for m, v in gaps.items() if m in ("L2A", "A2E", "L2W")}
+        driver = max(actionable, key=actionable.get) if actionable else None
+        l2e_q = stage_q.get("L2E", np.nan)
+        scenario = max(0.0, (l2e_q - b.L2E) * b.leads) if pd.notna(l2e_q) and pd.notna(b.L2E) else np.nan
+        if driver == "L2A":
+            action = "Review lead qualification, audience targeting, campaign/source mix and application-start journey."
+        elif driver == "A2E":
+            action = "Review application follow-up speed, counselling, eligibility friction, fee objections and payment completion."
+        elif driver == "L2W":
+            action = "Review lead validity, targeting, contactability and speed-to-lead."
+        else:
+            action = "Review the full funnel and compare against the strongest matched category peers."
+        diagnostics.append({
+            "program_code": b.program_code, "program_name": b.get("program_name"),
+            "tech_management": cat, "leads": b.leads, "enrollments": b.get("enrollments"),
+            "batch_L2E": b.get("L2E"), "category_L2E": b.get("category_l2e"),
+            "top_quartile_L2E": l2e_q, "L2E_gap_pp_to_top_quartile": (l2e_q-b.L2E)*100 if pd.notna(l2e_q) and pd.notna(b.L2E) else np.nan,
+            "estimated_enrollment_scenario": scenario, "largest_funnel_gap": driver,
+            "batch_stage_rate": own.get(driver, np.nan) if driver else np.nan,
+            "top_quartile_stage_rate": stage_q.get(driver, np.nan) if driver else np.nan,
+            "recommended_investigation": action,
+        })
+    diagnostics = pd.DataFrame(diagnostics)
+    return {"programs": p, "categories": categories, "batches": batches, "diagnostics": diagnostics}
+
+
+def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
+    st.markdown("## Category Performance Intelligence")
+    st.caption("Management-focused analysis of category winners, batch-level exceptions, performance drivers and evidence-backed improvement actions.")
+    @st.cache_data(show_spinner="Building category and batch performance evidence...")
+    def _cached_management(dataframe: pd.DataFrame):
+        p, meta = prepare_programs(dataframe)
+        return _build_management_tables(p), meta
+
+    built, meta = _cached_management(raw_df)
+    programs = built["programs"]
+    categories = built["categories"]
+    batches = built["batches"]
+    diagnostics = built["diagnostics"]
+    if programs.empty or categories.empty:
+        st.error("Cannot run the category analysis. Required columns: program_code and tech_management.")
         return
 
-    a, b, c, d = st.columns(4)
-    a.metric("Programs analysed", f"{meta['programs']:,}")
-    b.metric("Source rows consolidated", f"{meta['raw_rows']:,}")
-    c.metric("Categories", f"{programs.tech_management.nunique():,}")
-    d.metric("Patterns detected", f"{len(findings):,}")
-    st.caption("All actual source metrics are consolidated to one row per program before program-level analysis. Findings are associations or scenarios, not causal proof.")
+    # Filters retain full category/batch context but narrow the investigation scope.
+    with st.expander("Analysis filters", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        cats = sorted(programs.tech_management.dropna().astype(str).unique())
+        fys = sorted(programs.financial_year.dropna().astype(str).unique()) if "financial_year" in programs else []
+        nr = sorted(programs.New_Repeat.dropna().astype(str).unique()) if "New_Repeat" in programs else []
+        with c1:
+            chosen_cats = st.multiselect("Tech management", cats, default=cats, key="mgmt_cat_filter")
+        with c2:
+            chosen_fys = st.multiselect("Financial year", fys, default=fys, key="mgmt_fy_filter")
+        with c3:
+            chosen_nr = st.multiselect("New / Repeat", nr, default=nr, key="mgmt_nr_filter")
+    scope = programs.copy()
+    for col, vals in [("tech_management", chosen_cats), ("financial_year", chosen_fys), ("New_Repeat", chosen_nr)]:
+        if col in scope:
+            scope = scope[scope[col].astype(str).isin(vals)] if vals else scope.iloc[0:0]
+    if scope.empty:
+        st.warning("No program batches match the selected filters.")
+        return
+    view = _build_management_tables(scope)
+    categories, batches, diagnostics = view["categories"], view["batches"], view["diagnostics"]
 
-    with st.expander("Investigation scope", expanded=False):
-        x1, x2, x3 = st.columns(3)
-        with x1:
-            categories = sorted(programs.tech_management.dropna().astype(str).unique())
-            selected_categories = st.multiselect("Tech management", categories, default=categories, key="intel_categories")
-        with x2:
-            fys = sorted(programs.financial_year.dropna().astype(str).unique()) if "financial_year" in programs else []
-            selected_fys = st.multiselect("Financial year", fys, default=fys, key="intel_fys")
-        with x3:
-            new_repeat = sorted(programs.New_Repeat.dropna().astype(str).unique()) if "New_Repeat" in programs else []
-            selected_nr = st.multiselect("New / Repeat", new_repeat, default=new_repeat, key="intel_nr")
-    filtered = programs.copy()
-    for col, vals in [("tech_management", selected_categories), ("financial_year", selected_fys), ("New_Repeat", selected_nr)]:
-        if col in filtered:
-            filtered = filtered[filtered[col].astype(str).isin(vals)] if vals else filtered.iloc[0:0]
-    if len(filtered) != len(programs):
-        # Re-run all methods against the filtered population, while retaining raw rows for source analysis.
-        raw_filtered = raw_df[raw_df.program_code.astype(str).isin(filtered.program_code.astype(str))]
-        result = _cached_discovery(raw_filtered)
-        programs, meta, findings, tables = result["programs"], result["meta"], result["findings"], result["tables"]
-    if not findings:
-        st.info("No sufficiently strong patterns met the current minimum sample-size rules. Try widening the investigation scope.")
+    st.markdown("### Executive performance snapshot")
+    total_leads = scope.leads.sum(min_count=1) if "leads" in scope else np.nan
+    total_enr = scope.enrollments.sum(min_count=1) if "enrollments" in scope else np.nan
+    total_gsv = scope.gsv_cr.sum(min_count=1) if "gsv_cr" in scope else np.nan
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Program batches", f"{scope.program_code.nunique():,}")
+    m2.metric("Leads", f"{total_leads:,.0f}" if pd.notna(total_leads) else "N/A")
+    m3.metric("Enrollments", f"{total_enr:,.0f}" if pd.notna(total_enr) else "N/A")
+    m4.metric("GSV", f"{total_gsv:,.2f}" if pd.notna(total_gsv) else "N/A")
 
-    st.markdown("### Discoveries")
-    if findings:
-        for i, f in enumerate(findings[:15], 1):
-            with st.container(border=True):
-                head = st.columns([5, 1])
-                head[0].markdown(f"**{i}. {f['title']}**")
-                head[1].markdown(f"`{f['priority']} priority`")
-                st.write(f["evidence"])
-                st.caption(f"Interpretation: {f['interpretation']}")
-                st.caption(f"Caveat: {f['caveat']}")
+    st.markdown("### 1. Category leaderboard")
+    display = categories.sort_values("enrollments", ascending=False).copy()
+    if not display.empty:
+        st.bar_chart(display.set_index("tech_management")[["enrollments"]])
+        pct = display.copy()
+        for c in ["L2W", "L2A", "W2A", "A2E", "L2E"]:
+            pct[c] = pct[c].map(_fmt_pct)
+        for c in ["CPL", "CAC", "GSV_per_enrollment"]:
+            if c in pct:
+                pct[c] = pct[c].map(lambda x: f"{x:,.2f}" if pd.notna(x) else "N/A")
+        st.dataframe(pct, use_container_width=True, hide_index=True)
+        st.caption("Conversion rankings require at least 8 program batches and 1,000 leads. Smaller categories remain visible but are not promoted as reliable conversion leaders.")
+        best_enr = display.iloc[0]
+        best_l2e = categories[(categories.leads >= 1000) & (categories.programs >= 8)].sort_values("L2E", ascending=False)
+        best_gsv = categories.sort_values("gsv_cr", ascending=False)
+        st.info(
+            f"**Volume leader:** {best_enr.tech_management} with {best_enr.enrollments:,.0f} enrollments. "
+            + (f"**Conversion leader:** {best_l2e.iloc[0].tech_management} at {_fmt_pct(best_l2e.iloc[0].L2E)} L2E (minimum 100 leads). " if not best_l2e.empty else "")
+            + (f"**GSV leader:** {best_gsv.iloc[0].tech_management} with {best_gsv.iloc[0].gsv_cr:,.2f} GSV." if not best_gsv.empty else "")
+        )
+
+    st.markdown("### 2. Top-performing program batches within each category")
+    st.caption("A batch is identified by `program_code`. Rankings are metric-specific; a high-volume batch is not automatically the best-converting batch.")
+    rank_metric = st.selectbox("Rank batches by", ["Enrollments", "GSV", "L2E", "L2A", "A2E"], key="batch_rank_metric")
+    metric_col = {"Enrollments": "enrollments", "GSV": "gsv_cr", "L2E": "L2E", "L2A": "L2A", "A2E": "A2E"}[rank_metric]
+    top_parts = []
+    qualified_categories = set(categories.loc[categories.programs >= 8, "tech_management"])
+    for cat, g in batches[batches.tech_management.isin(qualified_categories)].groupby("tech_management"):
+        eligible = g[g.leads >= 30] if metric_col in ["L2E", "L2A", "A2E"] else g
+        top_parts.append(eligible.sort_values(metric_col, ascending=False, na_position="last").head(3))
+    top_batches = pd.concat(top_parts, ignore_index=True) if top_parts else pd.DataFrame()
+    if not top_batches.empty:
+        if metric_col in ["L2E", "L2A", "A2E"]:
+            st.bar_chart(top_batches.pivot(index="program_code", columns="tech_management", values=metric_col).fillna(0))
+        else:
+            st.bar_chart(top_batches.set_index("program_code")[[metric_col]])
+        st.dataframe(top_batches, use_container_width=True, hide_index=True)
     else:
-        st.write("The discovery scan did not find a pattern strong enough to surface.")
+        st.info("No eligible batch results for this ranking.")
 
-    st.markdown("### Ask an investigation question")
-    question = st.text_input("What should the AI focus on?", placeholder="e.g. Explain the category mix-adjusted conversion findings")
-    st.caption("The discovery scan calculates the evidence automatically. The optional LLM brief prioritizes and explains those verified findings; it does not run arbitrary new calculations from the question.")
-    if st.button("Generate AI investigation brief", type="primary", disabled=not findings, key="run_category_ai_brief"):
-        with st.spinner("Interpreting verified analytical findings..."):
-            try:
-                st.markdown(_llm_commentary(st, findings, question))
-            except Exception as exc:
-                st.warning(f"LLM interpretation unavailable: {exc}")
-                st.info("The deterministic discovery results above remain available.")
+    st.markdown("### 3. Strong category, weak batches")
+    if not diagnostics.empty:
+        weak = diagnostics.sort_values("estimated_enrollment_scenario", ascending=False)
+        st.caption("Underperforming batches are compared with their own category's top-quartile batches, requiring at least 30 leads and four eligible category batches.")
+        st.bar_chart(weak.head(20).set_index("program_code")[["estimated_enrollment_scenario"]])
+        st.dataframe(weak.head(30), use_container_width=True, hide_index=True)
+        # Highlight categories with strong overall conversion but weak batch exceptions.
+        weak_cats = set(weak.tech_management)
+        for _, catrow in categories.sort_values("L2E", ascending=False).iterrows():
+            subset = weak[weak.tech_management == catrow.tech_management]
+            if not subset.empty:
+                st.warning(
+                    f"**{catrow.tech_management}:** category L2E is {_fmt_pct(catrow.L2E)}, "
+                    f"but {len(subset)} batches show a measurable gap against the category's top-quartile L2E. "
+                    f"Largest scenario: {subset.estimated_enrollment_scenario.max():,.1f} enrollments."
+                )
+    else:
+        st.info("No sufficiently supported batch-level gaps were found.")
 
-    tabs = st.tabs(["Fair comparison", "Program archetypes", "Anomaly review", "Batch intelligence", "Source dependency", "Opportunity scenarios", "Associations"])
-    with tabs[0]:
-        st.markdown("**Raw vs mix-adjusted L2E**")
-        t = tables.get("mix_adjusted", pd.DataFrame())
-        if not t.empty:
-            display = t.copy()
-            for col in ["raw_l2e", "mix_adjusted_l2e", "adjustment_coverage"]:
-                display[col] = display[col].map(_fmt_pct)
-            display["pp_difference"] = display["pp_difference"].map(lambda x: f"{x:+.1f} pp" if pd.notna(x) else "N/A")
-            st.dataframe(display, use_container_width=True, hide_index=True)
-            st.caption("Direct standardization by New/Repeat and fee bucket. This is a diagnostic adjustment, not a causal model.")
-        else:
-            st.info("Not enough category/segment coverage for mix-adjusted comparison.")
-        seg = tables.get("segment_gaps", pd.DataFrame())
-        if not seg.empty:
-            st.markdown("**Largest segment differences vs the rest of the dataset**")
-            st.dataframe(seg.head(15), use_container_width=True, hide_index=True)
-    with tabs[1]:
-        st.caption(result.get("cluster_note", ""))
-        t = tables.get("archetypes", pd.DataFrame())
-        if not t.empty:
-            st.dataframe(t.merge(programs[[c for c in ["program_code", "program_name", "tech_management", "category", "New_Repeat", "leads", "enrollments"] if c in programs]], on=[c for c in ["program_code", "program_name", "tech_management", "category", "New_Repeat", "leads", "enrollments"] if c in t and c in programs], how="left") if False else t, use_container_width=True, hide_index=True)
-            st.caption("Cluster labels are generated from conversion, value and sales-duration profiles. They are exploratory, not fixed business classifications.")
-        else:
-            st.info("Clustering could not be run on the available fields.")
-    with tabs[2]:
-        t = tables.get("anomalies", pd.DataFrame())
-        if not t.empty:
-            st.dataframe(t, use_container_width=True, hide_index=True)
-            st.caption("Anomaly flags identify unusual profiles for review, not necessarily errors or poor performance.")
-        else:
-            st.info("No anomaly results are available.")
-    with tabs[3]:
-        t = tables.get("batch_changes", pd.DataFrame())
-        if not t.empty:
-            st.dataframe(t, use_container_width=True, hide_index=True)
-            st.caption("Current program totals are compared with previous-batch metrics embedded for the same program. Only records with previous_batch_code are included.")
-        else:
-            st.info("No matched previous-batch metrics were available.")
-    with tabs[4]:
-        t = tables.get("source_dependency", pd.DataFrame())
-        if not t.empty:
-            st.dataframe(t.sort_values(["tech_management", "leads"], ascending=[True, False]), use_container_width=True, hide_index=True)
-            st.caption("Source rows are retained for channel attribution analysis. Spend/ROI claims are not made because source-level spend coverage is incomplete.")
-        else:
-            st.info("Source attribution fields are unavailable.")
-    with tabs[5]:
-        t = tables.get("opportunities", pd.DataFrame())
-        if not t.empty:
-            st.dataframe(t, use_container_width=True, hide_index=True)
-            st.caption("Scenario: category segments reach peer-category L2E within the same New/Repeat and fee-bucket segment. Not a forecast or guaranteed uplift.")
-        else:
-            st.info("Insufficient matched peer segments to estimate opportunity scenarios.")
-    with tabs[6]:
-        t = tables.get("associations", pd.DataFrame())
-        if not t.empty:
-            st.dataframe(t, use_container_width=True, hide_index=True)
-            st.caption("Spearman rank correlations are exploratory. They do not establish causation and may be confounded by program mix.")
-        else:
-            st.info("No sufficiently supported correlations were found.")
+    st.markdown("### 4. Why the best batches performed well")
+    if not top_batches.empty:
+        selected_batch = st.selectbox("Inspect a top-performing batch", top_batches.program_code.astype(str).unique(), key="inspect_top_batch")
+        selected = batches[batches.program_code.astype(str) == selected_batch].head(1)
+        if not selected.empty:
+            r = selected.iloc[0]
+            peers = batches[(batches.tech_management == r.tech_management) & (batches.leads >= 30)]
+            st.write(f"**{selected_batch}** belongs to **{r.tech_management}**. Its funnel is compared with category peers:")
+            comp = pd.DataFrame({
+                "Metric": ["Lead → Warm lead", "Lead → Application", "Application → Enrollment", "Lead → Enrollment"],
+                "Selected batch": [r.get("L2W"), r.get("L2A"), r.get("A2E"), r.get("L2E")],
+                "Category peer median": [peers[c].median() if c in peers else np.nan for c in ["L2W", "L2A", "A2E", "L2E"]],
+                "Category peer top quartile": [peers[c].quantile(.75) if c in peers else np.nan for c in ["L2W", "L2A", "A2E", "L2E"]],
+            })
+            st.dataframe(comp, use_container_width=True, hide_index=True)
+            st.bar_chart(comp.set_index("Metric")[["Selected batch", "Category peer median", "Category peer top quartile"]])
+            st.caption("These comparisons identify what distinguished the batch in the observed data. They do not prove the operational cause.")
 
-    st.markdown("### Program-level evidence explorer")
-    view_cols = [c for c in ["program_code", "program_name", "tech_management", "category", "financial_year", "New_Repeat",
-                              "program_fee_bucket", "sale_duration_in_days_new", "leads", "applications", "enrollments", "L2E", "gsv_cr", "Paid L2E"] if c in programs]
-    st.dataframe(programs[view_cols], use_container_width=True, hide_index=True, height=360)
+    st.markdown("### 5. What weaker batches should have done differently")
+    if not diagnostics.empty:
+        weak = diagnostics.sort_values("estimated_enrollment_scenario", ascending=False)
+        st.dataframe(weak[[
+            "program_code", "tech_management", "leads", "batch_L2E", "category_L2E",
+            "top_quartile_L2E", "L2E_gap_pp_to_top_quartile", "estimated_enrollment_scenario",
+            "largest_funnel_gap", "batch_stage_rate", "top_quartile_stage_rate", "recommended_investigation",
+        ]].head(30), use_container_width=True, hide_index=True)
+        st.caption("Enrollment scenarios apply the category's top-quartile L2E to the batch's actual lead volume. They are benchmark scenarios, not forecasts or guaranteed results.")
+    else:
+        st.info("No supported recommendation scenarios are available.")
 
-    _render_category_chat(st, raw_df, programs, result)
+    st.markdown("### 6. Plan, spend and commercial proof")
+    commercial_cols = [c for c in ["tech_management", "programs", "spends", "CPL", "CAC", "Budget_plan", "Budget_utilization",
+                                   "Lead_plan", "Lead_plan_attainment", "Application_plan", "Application_plan_attainment",
+                                   "Enrollment_plan", "Enrollment_plan_attainment", "GSV_plan", "GSV_plan_attainment"] if c in categories]
+    if commercial_cols:
+        st.dataframe(categories[commercial_cols], use_container_width=True, hide_index=True)
+        st.caption("Spend and plan metrics are displayed only where source values exist. Missing values remain unavailable, not zero.")
+    st.markdown("### 7. Batch contribution and concentration")
+    contribution = batches[["program_code", "tech_management", "leads", "enrollments", "gsv_cr"]].copy()
+    for metric in ["leads", "enrollments", "gsv_cr"]:
+        contribution[f"{metric}_share_in_category"] = contribution[metric] / contribution.groupby("tech_management")[metric].transform("sum")
+    st.dataframe(contribution.sort_values("gsv_cr", ascending=False).head(30), use_container_width=True, hide_index=True)
 
+    st.markdown("### Evidence and methodology")
+    st.write(
+        f"- **Batch identifier:** `program_code` (one unique program batch per code). `program_batch_code` and `batch_number` are descriptive fields only.\n"
+        f"- **Aggregation:** {meta.get('raw_rows', 0):,} source rows consolidated to {meta.get('programs', 0):,} program batches. Actual source-attributed funnel metrics and source-allocated planned values are summed; paid metrics repeated across sources are retained once per program.\n"
+        "- **Top quartile:** category-specific 75th percentile among batches with at least 30 leads; categories need at least four eligible batches for peer diagnostics.\n"
+        "- **Causality:** data shows what differed, not proof of why. Recommendations are operational hypotheses to validate.\n"
+        "- **Missing values:** treated as unavailable, not zero. Spend/CAC claims require recorded spend."
+    )
+
+    # Keep the existing context-aware conversation below the evidence-led report.
+    _render_category_chat(st, raw_df[raw_df.program_code.astype(str).isin(scope.program_code.astype(str))], scope, {
+        "findings": [], "tables": {"category_performance": categories, "batch_diagnostics": diagnostics,
+                                   "top_batches": top_batches}, "programs": scope, "meta": meta,
+    })
 
 
 def _category_chat_context(raw: pd.DataFrame, programs: pd.DataFrame, result: dict) -> str:
