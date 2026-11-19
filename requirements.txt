@@ -2,6 +2,6 @@ streamlit
 pandas
 openai
 python-dotenv
-pandas
 numpy
 requests
+scikit-learn
