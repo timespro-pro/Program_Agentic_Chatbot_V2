@@ -4775,232 +4775,42 @@ render_html(
 
 
 # =========================================================
-# BUSINESS OBJECTIVE
+# PAGE NAVIGATION
 # =========================================================
 
-render_html(
-    """
-    <div class="objective-card">
-
-        <div class="objective-icon">
-            🎯
-        </div>
-
-        <div class="objective-content">
-
-            <div class="objective-title">
-                Business Objective
-            </div>
-
-            <div class="objective-text">
-                Assess business performance, pinpoint areas of deterioration,
-                identify key drivers, and prioritize Finance and Marketing actions.
-            </div>
-
-        </div>
-
-    </div>
-    """
+selected_page = st.radio(
+    "Choose analysis page",
+    ["Program Analysis", "Category Analysis"],
+    horizontal=True,
+    key="main_analysis_page",
+    label_visibility="collapsed",
 )
 
+if selected_page == "Program Analysis":
 
-# =========================================================
-# SOURCE FILTER
-# =========================================================
-
-filtered_result = apply_source_filter(
-    raw_df,
-    complete_rows_only=True,
-)
-
-
-if isinstance(
-    filtered_result,
-    tuple,
-):
-
-    df = filtered_result[0]
-
-else:
-
-    df = filtered_result
-
-
-# =========================================================
-# CURRENT PROGRAMS
-# =========================================================
-
-primary_programs = []
-
-if "program_code" in df.columns:
-
-    primary_programs = clean_unique_values(
-        df["program_code"].tolist()
-    )
-
-
-check_programs = []
-
-if (
-    check_df is not None
-    and "program_code" in check_df.columns
-):
-
-    check_programs = clean_unique_values(
-        check_df["program_code"].tolist()
-    )
-
-
-try:
-
-    current_batches = _current_batch_codes(
-        df
-    )
-
-except Exception:
-
-    current_batches = []
-
-
-current_batches = clean_unique_values(
-    list(current_batches)
-)
-
-
-current_batches = sorted(
-    set(current_batches)
-    |
-    set(check_programs)
-)
-
-
-# =========================================================
-# OLD BATCH RELATIONSHIP
-# =========================================================
-
-def get_old_batches(new_batch):
-    """Return selectable historical batches for the selected program.
-
-    Include (1) available batches in the explicit previous_batch_code lineage,
-    and (2) earlier numbered batches with the same program prefix. The second
-    rule allows valid historical comparisons when the data's previous-batch
-    pointer skips a batch (for example, CQF_09 points to CQF_07, while CQF_08
-    exists as another earlier CQF batch).
-    """
-    if not new_batch or str(new_batch).strip().lower() in {"", "select a program", "nan", "none", "<na>"}:
-        return []
-
-    relationship_frames = []
-    all_codes = set()
-    for frame in (check_df, df):
-        if frame is None or frame.empty or "program_code" not in frame.columns:
-            continue
-        all_codes.update(
-            str(value).strip()
-            for value in frame["program_code"].dropna().tolist()
-            if str(value).strip() and str(value).strip().lower() not in {"nan", "none", "<na>"}
-        )
-        if "previous_batch_code" in frame.columns:
-            relationship_frames.append(frame[["program_code", "previous_batch_code"]].copy())
-
-    new_batch = str(new_batch).strip()
-    previous_by_program = {}
-    if relationship_frames:
-        relationships = pd.concat(relationship_frames, ignore_index=True)
-        for program, previous in relationships.itertuples(index=False, name=None):
-            if pd.isna(program) or pd.isna(previous):
-                continue
-            program, previous = str(program).strip(), str(previous).strip()
-            if program.lower() in {"", "nan", "none", "<na>"} or previous.lower() in {"", "nan", "none", "<na>"}:
-                continue
-            previous_by_program.setdefault(program, [])
-            if previous not in previous_by_program[program]:
-                previous_by_program[program].append(previous)
-
-    # Follow explicit historical links first.
-    historical = []
-    visited = {new_batch}
-    frontier = [new_batch]
-    while frontier:
-        current = frontier.pop(0)
-        for previous in previous_by_program.get(current, []):
-            if previous in visited:
-                continue
-            visited.add(previous)
-            if previous in all_codes:
-                historical.append(previous)
-                frontier.append(previous)
-
-    # Also include earlier numbered batches sharing the same prefix, even if
-    # the explicit pointer skips them. Example: CQF_09 -> CQF_07, but CQF_08
-    # is still offered as a historical comparison because it exists in data.
-    import re
-    match = re.match(r"^(.*?)(\d+)$", new_batch)
-    if match:
-        prefix, current_number = match.group(1), int(match.group(2))
-        same_family = []
-        for code in all_codes:
-            candidate = re.match(r"^(.*?)(\d+)$", code)
-            if not candidate or candidate.group(1) != prefix:
-                continue
-            number = int(candidate.group(2))
-            if number < current_number:
-                same_family.append((number, code))
-        # Newest earlier batches first; avoid duplicating lineage entries.
-        for _, code in sorted(same_family, reverse=True):
-            if code not in visited:
-                historical.append(code)
-                visited.add(code)
-
-    return historical
-
-
-# =========================================================
-# PROGRAM SELECTION
-# =========================================================
-
-render_html(
-    """
-    <div class="selection-header">
-
-        <div class="selection-bar"></div>
-
-        <div class="selection-title">
-            Program Selection
-        </div>
-
-    </div>
-    """
-)
-
-
-render_html(
-    """
-    <div class="selection-description">
-        Choose the program and batch to analyse performance.
-    </div>
-    """
-)
-
-
-new_col, old_col = st.columns(
-    [1, 1],
-    gap="large",
-)
-
-
-with new_col:
+    # =========================================================
+    # BUSINESS OBJECTIVE
+    # =========================================================
 
     render_html(
         """
-        <div class="batch-heading">
+        <div class="objective-card">
 
-            <div class="batch-icon">
-                🎓
+            <div class="objective-icon">
+                🎯
             </div>
 
-            <div class="batch-title">
-                New Batch
+            <div class="objective-content">
+
+                <div class="objective-title">
+                    Business Objective
+                </div>
+
+                <div class="objective-text">
+                    Assess business performance, pinpoint areas of deterioration,
+                    identify key drivers, and prioritize Finance and Marketing actions.
+                </div>
+
             </div>
 
         </div>
@@ -5008,62 +4818,169 @@ with new_col:
     )
 
 
-    new_options = (
-        ["Select a program"]
-        +
-        current_batches
+    # =========================================================
+    # SOURCE FILTER
+    # =========================================================
+
+    filtered_result = apply_source_filter(
+        raw_df,
+        complete_rows_only=True,
     )
 
 
-    default_new = (
-        st.session_state.selected_program
-    )
+    if isinstance(
+        filtered_result,
+        tuple,
+    ):
+
+        df = filtered_result[0]
+
+    else:
+
+        df = filtered_result
 
 
-    if default_new not in new_options:
+    # =========================================================
+    # CURRENT PROGRAMS
+    # =========================================================
 
-        default_new = "Select a program"
+    primary_programs = []
 
+    if "program_code" in df.columns:
 
-    selected_new = st.selectbox(
-        "New Batch",
-        new_options,
-        index=new_options.index(
-            default_new
-        ),
-        label_visibility="collapsed",
-        key="new_batch_selector",
-    )
-
-    # Clear the Old Batch selection whenever New Batch changes. Otherwise,
-    # Streamlit session state can carry old selections into the next program
-    # and they may be unintentionally included in the next analysis.
-    previous_new_batch = st.session_state.get("_last_new_batch_for_old_selector")
-    if previous_new_batch != selected_new:
-        st.session_state["selected_old_batch"] = []
-        if "old_batch_selector" in st.session_state:
-            st.session_state["old_batch_selector"] = []
-        st.session_state["_last_new_batch_for_old_selector"] = selected_new
-
-    if selected_new != "Select a program":
-
-        st.session_state.selected_program = (
-            selected_new
+        primary_programs = clean_unique_values(
+            df["program_code"].tolist()
         )
 
 
-with old_col:
+    check_programs = []
+
+    if (
+        check_df is not None
+        and "program_code" in check_df.columns
+    ):
+
+        check_programs = clean_unique_values(
+            check_df["program_code"].tolist()
+        )
+
+
+    try:
+
+        current_batches = _current_batch_codes(
+            df
+        )
+
+    except Exception:
+
+        current_batches = []
+
+
+    current_batches = clean_unique_values(
+        list(current_batches)
+    )
+
+
+    current_batches = sorted(
+        set(current_batches)
+        |
+        set(check_programs)
+    )
+
+
+    # =========================================================
+    # OLD BATCH RELATIONSHIP
+    # =========================================================
+
+    def get_old_batches(new_batch):
+        """Return selectable historical batches for the selected program.
+
+        Include (1) available batches in the explicit previous_batch_code lineage,
+        and (2) earlier numbered batches with the same program prefix. The second
+        rule allows valid historical comparisons when the data's previous-batch
+        pointer skips a batch (for example, CQF_09 points to CQF_07, while CQF_08
+        exists as another earlier CQF batch).
+        """
+        if not new_batch or str(new_batch).strip().lower() in {"", "select a program", "nan", "none", "<na>"}:
+            return []
+
+        relationship_frames = []
+        all_codes = set()
+        for frame in (check_df, df):
+            if frame is None or frame.empty or "program_code" not in frame.columns:
+                continue
+            all_codes.update(
+                str(value).strip()
+                for value in frame["program_code"].dropna().tolist()
+                if str(value).strip() and str(value).strip().lower() not in {"nan", "none", "<na>"}
+            )
+            if "previous_batch_code" in frame.columns:
+                relationship_frames.append(frame[["program_code", "previous_batch_code"]].copy())
+
+        new_batch = str(new_batch).strip()
+        previous_by_program = {}
+        if relationship_frames:
+            relationships = pd.concat(relationship_frames, ignore_index=True)
+            for program, previous in relationships.itertuples(index=False, name=None):
+                if pd.isna(program) or pd.isna(previous):
+                    continue
+                program, previous = str(program).strip(), str(previous).strip()
+                if program.lower() in {"", "nan", "none", "<na>"} or previous.lower() in {"", "nan", "none", "<na>"}:
+                    continue
+                previous_by_program.setdefault(program, [])
+                if previous not in previous_by_program[program]:
+                    previous_by_program[program].append(previous)
+
+        # Follow explicit historical links first.
+        historical = []
+        visited = {new_batch}
+        frontier = [new_batch]
+        while frontier:
+            current = frontier.pop(0)
+            for previous in previous_by_program.get(current, []):
+                if previous in visited:
+                    continue
+                visited.add(previous)
+                if previous in all_codes:
+                    historical.append(previous)
+                    frontier.append(previous)
+
+        # Also include earlier numbered batches sharing the same prefix, even if
+        # the explicit pointer skips them. Example: CQF_09 -> CQF_07, but CQF_08
+        # is still offered as a historical comparison because it exists in data.
+        import re
+        match = re.match(r"^(.*?)(\d+)$", new_batch)
+        if match:
+            prefix, current_number = match.group(1), int(match.group(2))
+            same_family = []
+            for code in all_codes:
+                candidate = re.match(r"^(.*?)(\d+)$", code)
+                if not candidate or candidate.group(1) != prefix:
+                    continue
+                number = int(candidate.group(2))
+                if number < current_number:
+                    same_family.append((number, code))
+            # Newest earlier batches first; avoid duplicating lineage entries.
+            for _, code in sorted(same_family, reverse=True):
+                if code not in visited:
+                    historical.append(code)
+                    visited.add(code)
+
+        return historical
+
+
+    # =========================================================
+    # PROGRAM SELECTION
+    # =========================================================
 
     render_html(
         """
-        <div class="batch-heading">
+        <div class="selection-header">
 
-            <div class="batch-icon">
-                👥
-            </div>
+            <div class="selection-bar"></div>
 
-            <div class="batch-title">
-                Old Batch
+            <div class="selection-title">
+                Program Selection
             </div>
 
         </div>
@@ -5071,1104 +4988,1183 @@ with old_col:
     )
 
 
-    if selected_new != "Select a program":
+    render_html(
+        """
+        <div class="selection-description">
+            Choose the program and batch to analyse performance.
+        </div>
+        """
+    )
 
-        old_options = get_old_batches(
-            selected_new
+
+    new_col, old_col = st.columns(
+        [1, 1],
+        gap="large",
+    )
+
+
+    with new_col:
+
+        render_html(
+            """
+            <div class="batch-heading">
+
+                <div class="batch-icon">
+                    🎓
+                </div>
+
+                <div class="batch-title">
+                    New Batch
+                </div>
+
+            </div>
+            """
         )
 
-    else:
 
-        old_options = []
-
-
-    # Allow selecting more than one historical batch.
-    if not old_options:
-        old_options = []
-
-    previous_selected = st.session_state.selected_old_batch
-    if isinstance(previous_selected, str):
-        previous_selected = [previous_selected] if previous_selected in old_options else []
-    elif not isinstance(previous_selected, (list, tuple, set)):
-        previous_selected = []
-    else:
-        previous_selected = [item for item in previous_selected if item in old_options]
-
-    selected_old = st.multiselect(
-        "Old Batch",
-        options=old_options,
-        default=previous_selected[:3],
-        placeholder="Select up to 3 old batches",
-        label_visibility="collapsed",
-        key="old_batch_selector",
-        max_selections=3,
-    )
-
-    # Keep session state aligned with the maximum allowed historical selection.
-    selected_old = list(selected_old)[:3]
-    st.session_state.selected_old_batch = selected_old
-
-
-
-program_code = (
-    None
-    if selected_new == "Select a program"
-    else selected_new
-)
-
-
-# Existing source-analysis functions compare against one previous batch at a time.
-# Keep the full selection for the UI/session state and use the first selected
-# batch for that single-batch comparison path. Batch Analysis independently
-# traces and compares the available historical lineage.
-old_batch_codes = list(dict.fromkeys(selected_old))[:3] if selected_old else []
-old_batch_code = old_batch_codes[0] if old_batch_codes else None
-
-
-# =========================================================
-# SOURCE PREVIEW
-# =========================================================
-
-@st.dialog(
-    "Source Data Preview",
-    width="large",
-)
-def show_data_preview():
-
-    st.caption("Unified source: data/Program Batch Data.csv")
-    st.dataframe(
-        df,
-        width="stretch",
-        height=500,
-        hide_index=True,
-    )
-
-
-# =========================================================
-# ANALYSIS TYPE
-# =========================================================
-# Analysis type selection is intentionally hidden. This tool always runs
-# Overall program analysis.
-analysis_type = "Overall program analysis"
-
-
-# =========================================================
-# ACTION BUTTONS
-# =========================================================
-
-render_html(
-    """
-    <div style="height:12px;"></div>
-    """
-)
-
-
-button_left, button_middle, button_space = st.columns(
-    [2.0, 2.0, 3.1],
-    gap="small",
-)
-
-
-with button_left:
-
-    preview_clicked = st.button(
-        "▣   Source Data Preview",
-        type="secondary",
-        width="stretch",
-        key="source_preview",
-    )
-
-
-with button_middle:
-
-    run_analysis = st.button(
-        "✦   Generate Analysis",
-        type="primary",
-        width="stretch",
-        key="generate_analysis",
-    )
-
-
-if preview_clicked:
-
-    show_data_preview()
-
-
-# =========================================================
-# GENERATE ANALYSIS
-# =========================================================
-
-if run_analysis:
-
-    if analysis_type not in {"Source analysis", "Batch Analysis", "Overall program analysis"}:
-
-        st.info(
-            f"{analysis_type} is planned but not connected yet. "
-            "Source analysis, Batch Analysis, and Overall program analysis are available now."
+        new_options = (
+            ["Select a program"]
+            +
+            current_batches
         )
 
-    elif not program_code:
 
-        st.warning("Please select a New Batch first.")
-
-    elif analysis_type == "Overall program analysis":
-
-        primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
-        advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
-        selected_old_for_analysis = list(dict.fromkeys(
-            code for code in old_batch_codes if code in old_options
-        ))[:3]
-        st.session_state.source_popup_batches = selected_old_for_analysis
-        st.session_state.source_popup_new_batch = program_code
-        cache_key = make_cache_key(
-            program_code=program_code,
-            primary_data_path=primary_data_path,
-            advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-prompt-v6-source-impact-prioritization-performance-status-labels",
-            selected_old_batches=selected_old_for_analysis,
+        default_new = (
+            st.session_state.selected_program
         )
 
-        with st.container():
-            try:
-                # The process-local lock avoids duplicate same-key OpenAI calls in this worker.
-                # GitHub stores reports across users and app restarts.
-                with get_process_lock(cache_key):
-                    cached = get_cached_report(cache_key)
-                    cache_diagnostic = get_cache_diagnostic()
-                    if cached:
-                        answer = cached["report"]
-                        metadata = cached.get("metadata", {})
-                        st.session_state.analysis_report = {
-                            "found": True,
-                            "analysis_type": "Overall program analysis",
-                            "program_code": program_code,
-                            "compared_batches": metadata.get("compared_batches", [program_code] + selected_old_for_analysis),
-                            "selected_old_batches": metadata.get("selected_old_batches", selected_old_for_analysis),
-                            "cache_status": "hit",
-                        }
-                        st.session_state.analysis_text = answer
-                    else:
-                        overall_result = build_overall_program_analysis(
-                            raw_df=raw_df,
-                            program_code=program_code,
-                            advisor_df=advisor_df,
-                            selected_old_batches=selected_old_for_analysis,
-                        )
-                        if overall_result.get("error"):
-                            st.error(overall_result["error"])
-                            st.stop()
 
-                        # Compact JSON reduces prompt size and latency without changing evidence.
-                        overall_payload = json.dumps(
-                            overall_result,
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                            default=str,
-                        )
-                        overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
+        if default_new not in new_options:
 
-REQUIRED OUTPUT — preserve this approved section order and naming exactly; do not invent extra top-level sections:
-1. “Executive Diagnosis + Summary of Reason”: start with one concise paragraph (maximum 2 sentences) stating whether the program is doing well, poorly, or mixed against plan and history. Follow with 4–6 short, evidence-backed bullets explaining the largest drivers.
-Immediately after section 1, add a new section titled “Where it went wrong”. Keep this section focused on why the program is underperforming or mixed, using 4–5 numbered, concise evidence-backed points. Explicitly compare plan vs actual and the selected current batch vs the previous and previous-to-previous batches where available. Quantify the gaps with actual values and percentages/percentage points. Do not assume a metric is bad merely because it changed: interpret conversion rates as higher-is-better and CPL/CAC as lower-is-better. Distinguish observed facts from hypotheses, and say when evidence is insufficient. Include two transparent ratings when the required data exists: (a) “Plan attainment rating” based on the average attainment of available planned leads, applications, enrollments, and GSV metrics (cap each attainment at 100% for scoring; exclude unavailable plan metrics), with 90–100 = Good, 75–89 = Watch, below 75 = Poor; show the underlying attainment percentage and metrics included; and (b) “Historical comparison rating” based on direction-aware comparison of available leads, applications, enrollments, L2W, L2A, L2E, W2A, A2E, CPL, and CAC against each available prior batch (higher is better for volumes/conversion rates; lower is better for CPL/CAC). Label this Good if more than half of comparable metrics improved, Mixed if improvements and declines are tied or neither side has a majority, and Poor if more than half deteriorated. Show the counts improved/declined/unchanged and never calculate a rating when evidence is insufficient. Do not treat missing values as zero and do not fabricate an overall score if the needed fields are unavailable.
-2. “Plan vs Actual”: a compact table with leads, applications, enrollments, observed spend vs planned budget, Actual GSV, Planned GSV, GSV variance, and plan attainment where available. Then explain the single most material gap in 1–2 sentences.
-3. “Current vs previous batch”, containing exactly these subsections:
-   - “3.1 Volume and commercial outcomes”: leads, warm leads, applications, enrollments, program fee, Actual GSV.
-   - “3.2 Conversion and acquisition efficiency”: L2W, L2A, L2E, W2A, A2E, CPL, CAC.
-   Compare the current batch with every selected Old Batch in the evidence (up to three old batches, four total). Include each selected batch as its own value column and comparison. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
-4. “Source-wise root-cause analysis”: provide a concise executive diagnosis followed by a source table that includes lead/application/enrollment contribution shares, funnel conversion rates, weakest stage versus the program blended benchmark, estimated enrollment gap versus the program blended L2E benchmark, impact priority, spend coverage, observed CPL and observed CAC. Use the supplied Python-computed impact estimates; do not recalculate them. Conversion ranking eligibility uses max(10 leads, 3% of program leads). Prioritize sources by estimated business impact, not merely lowest conversion. Explain that enrollment-gap estimates are counterfactual benchmarks, not causal attribution or guaranteed recoverable enrollments. Separate observed facts from hypotheses, and disclose incomplete spend coverage. Discuss volume contribution, conversion efficiency, commercial efficiency, and impact prioritization.
-5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation. Add a brief 1–2 sentence experience interpretation directly under this section: lower tenure-month values mean more experienced advisors, while higher tenure-month values mean less experienced advisors. Relate the observed performance of the tenure groups to this experience scale only where the table supports it; do not infer causation.
-6. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
+            default_new = "Select a program"
 
-RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; label this assumption. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; show percentage-point changes. Do not add a separate Metric Scorecard; the specifically requested “Where it went wrong” section is required and should not be duplicated elsewhere. Do not invent missing metrics or causal explanations. Use valid Markdown tables. Aim for moderate detail: useful interpretation, not a terse summary or a long essay.
 
-EVIDENCE JSON:
-{overall_payload}
-""".strip()
+        selected_new = st.selectbox(
+            "New Batch",
+            new_options,
+            index=new_options.index(
+                default_new
+            ),
+            label_visibility="collapsed",
+            key="new_batch_selector",
+        )
 
-                        try:
-                            client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-                            model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
-                            response = client.responses.create(
-                                model=model,
-                                instructions=(
-                                    "You are a senior marketing analytics consultant. Follow the requested report "
-                                    "structure exactly. Return complete Markdown with numbered headings and valid Markdown "
-                                    "tables. Never invent metrics, history, or causes. Use N/A when evidence is unavailable."
-                                ),
-                                input=overall_prompt,
-                                max_output_tokens=5200,
-                                reasoning={"effort": "low"},
+        # Clear the Old Batch selection whenever New Batch changes. Otherwise,
+        # Streamlit session state can carry old selections into the next program
+        # and they may be unintentionally included in the next analysis.
+        previous_new_batch = st.session_state.get("_last_new_batch_for_old_selector")
+        if previous_new_batch != selected_new:
+            st.session_state["selected_old_batch"] = []
+            if "old_batch_selector" in st.session_state:
+                st.session_state["old_batch_selector"] = []
+            st.session_state["_last_new_batch_for_old_selector"] = selected_new
+
+        if selected_new != "Select a program":
+
+            st.session_state.selected_program = (
+                selected_new
+            )
+
+
+    with old_col:
+
+        render_html(
+            """
+            <div class="batch-heading">
+
+                <div class="batch-icon">
+                    👥
+                </div>
+
+                <div class="batch-title">
+                    Old Batch
+                </div>
+
+            </div>
+            """
+        )
+
+
+        if selected_new != "Select a program":
+
+            old_options = get_old_batches(
+                selected_new
+            )
+
+        else:
+
+            old_options = []
+
+
+        # Allow selecting more than one historical batch.
+        if not old_options:
+            old_options = []
+
+        previous_selected = st.session_state.selected_old_batch
+        if isinstance(previous_selected, str):
+            previous_selected = [previous_selected] if previous_selected in old_options else []
+        elif not isinstance(previous_selected, (list, tuple, set)):
+            previous_selected = []
+        else:
+            previous_selected = [item for item in previous_selected if item in old_options]
+
+        selected_old = st.multiselect(
+            "Old Batch",
+            options=old_options,
+            default=previous_selected[:3],
+            placeholder="Select up to 3 old batches",
+            label_visibility="collapsed",
+            key="old_batch_selector",
+            max_selections=3,
+        )
+
+        # Keep session state aligned with the maximum allowed historical selection.
+        selected_old = list(selected_old)[:3]
+        st.session_state.selected_old_batch = selected_old
+
+
+
+    program_code = (
+        None
+        if selected_new == "Select a program"
+        else selected_new
+    )
+
+
+    # Existing source-analysis functions compare against one previous batch at a time.
+    # Keep the full selection for the UI/session state and use the first selected
+    # batch for that single-batch comparison path. Batch Analysis independently
+    # traces and compares the available historical lineage.
+    old_batch_codes = list(dict.fromkeys(selected_old))[:3] if selected_old else []
+    old_batch_code = old_batch_codes[0] if old_batch_codes else None
+
+
+    # =========================================================
+    # SOURCE PREVIEW
+    # =========================================================
+
+    @st.dialog(
+        "Source Data Preview",
+        width="large",
+    )
+    def show_data_preview():
+
+        st.caption("Unified source: data/Program Batch Data.csv")
+        st.dataframe(
+            df,
+            width="stretch",
+            height=500,
+            hide_index=True,
+        )
+
+
+    # =========================================================
+    # ANALYSIS TYPE
+    # =========================================================
+    # Analysis type selection is intentionally hidden. This tool always runs
+    # Overall program analysis.
+    analysis_type = "Overall program analysis"
+
+
+    # =========================================================
+    # ACTION BUTTONS
+    # =========================================================
+
+    render_html(
+        """
+        <div style="height:12px;"></div>
+        """
+    )
+
+
+    button_left, button_middle, button_space = st.columns(
+        [2.0, 2.0, 3.1],
+        gap="small",
+    )
+
+
+    with button_left:
+
+        preview_clicked = st.button(
+            "▣   Source Data Preview",
+            type="secondary",
+            width="stretch",
+            key="source_preview",
+        )
+
+
+    with button_middle:
+
+        run_analysis = st.button(
+            "✦   Generate Analysis",
+            type="primary",
+            width="stretch",
+            key="generate_analysis",
+        )
+
+
+    if preview_clicked:
+
+        show_data_preview()
+
+
+    # =========================================================
+    # GENERATE ANALYSIS
+    # =========================================================
+
+    if run_analysis:
+
+        if analysis_type not in {"Source analysis", "Batch Analysis", "Overall program analysis"}:
+
+            st.info(
+                f"{analysis_type} is planned but not connected yet. "
+                "Source analysis, Batch Analysis, and Overall program analysis are available now."
+            )
+
+        elif not program_code:
+
+            st.warning("Please select a New Batch first.")
+
+        elif analysis_type == "Overall program analysis":
+
+            primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
+            advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
+            selected_old_for_analysis = list(dict.fromkeys(
+                code for code in old_batch_codes if code in old_options
+            ))[:3]
+            st.session_state.source_popup_batches = selected_old_for_analysis
+            st.session_state.source_popup_new_batch = program_code
+            cache_key = make_cache_key(
+                program_code=program_code,
+                primary_data_path=primary_data_path,
+                advisor_data_path=advisor_data_path,
+                prompt_version="overall-program-prompt-v6-source-impact-prioritization-performance-status-labels",
+                selected_old_batches=selected_old_for_analysis,
+            )
+
+            with st.container():
+                try:
+                    # The process-local lock avoids duplicate same-key OpenAI calls in this worker.
+                    # GitHub stores reports across users and app restarts.
+                    with get_process_lock(cache_key):
+                        cached = get_cached_report(cache_key)
+                        cache_diagnostic = get_cache_diagnostic()
+                        if cached:
+                            answer = cached["report"]
+                            metadata = cached.get("metadata", {})
+                            st.session_state.analysis_report = {
+                                "found": True,
+                                "analysis_type": "Overall program analysis",
+                                "program_code": program_code,
+                                "compared_batches": metadata.get("compared_batches", [program_code] + selected_old_for_analysis),
+                                "selected_old_batches": metadata.get("selected_old_batches", selected_old_for_analysis),
+                                "cache_status": "hit",
+                            }
+                            st.session_state.analysis_text = answer
+                        else:
+                            overall_result = build_overall_program_analysis(
+                                raw_df=raw_df,
+                                program_code=program_code,
+                                advisor_df=advisor_df,
+                                selected_old_batches=selected_old_for_analysis,
                             )
-                            answer = (response.output_text or "").strip()
+                            if overall_result.get("error"):
+                                st.error(overall_result["error"])
+                                st.stop()
 
-                            # Validate the required new section before caching the report.
-                            # If the model omits it, ask for only that missing section and insert it
-                            # immediately after the Executive Diagnosis section.
-                            if answer and "where it went wrong" not in answer.lower():
-                                repair = client.responses.create(
+                            # Compact JSON reduces prompt size and latency without changing evidence.
+                            overall_payload = json.dumps(
+                                overall_result,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                                default=str,
+                            )
+                            overall_prompt = f"""Write a concise, executive-ready Overall Program Analysis for {program_code}. Use ONLY the JSON evidence below; never invent data or causes. Missing values are N/A.
+
+    REQUIRED OUTPUT — preserve this approved section order and naming exactly; do not invent extra top-level sections:
+    1. “Executive Diagnosis + Summary of Reason”: start with one concise paragraph (maximum 2 sentences) stating whether the program is doing well, poorly, or mixed against plan and history. Follow with 4–6 short, evidence-backed bullets explaining the largest drivers.
+    Immediately after section 1, add a new section titled “Where it went wrong”. Keep this section focused on why the program is underperforming or mixed, using 4–5 numbered, concise evidence-backed points. Explicitly compare plan vs actual and the selected current batch vs the previous and previous-to-previous batches where available. Quantify the gaps with actual values and percentages/percentage points. Do not assume a metric is bad merely because it changed: interpret conversion rates as higher-is-better and CPL/CAC as lower-is-better. Distinguish observed facts from hypotheses, and say when evidence is insufficient. Include two transparent ratings when the required data exists: (a) “Plan attainment rating” based on the average attainment of available planned leads, applications, enrollments, and GSV metrics (cap each attainment at 100% for scoring; exclude unavailable plan metrics), with 90–100 = Good, 75–89 = Watch, below 75 = Poor; show the underlying attainment percentage and metrics included; and (b) “Historical comparison rating” based on direction-aware comparison of available leads, applications, enrollments, L2W, L2A, L2E, W2A, A2E, CPL, and CAC against each available prior batch (higher is better for volumes/conversion rates; lower is better for CPL/CAC). Label this Good if more than half of comparable metrics improved, Mixed if improvements and declines are tied or neither side has a majority, and Poor if more than half deteriorated. Show the counts improved/declined/unchanged and never calculate a rating when evidence is insufficient. Do not treat missing values as zero and do not fabricate an overall score if the needed fields are unavailable.
+    2. “Plan vs Actual”: a compact table with leads, applications, enrollments, observed spend vs planned budget, Actual GSV, Planned GSV, GSV variance, and plan attainment where available. Then explain the single most material gap in 1–2 sentences.
+    3. “Current vs previous batch”, containing exactly these subsections:
+       - “3.1 Volume and commercial outcomes”: leads, warm leads, applications, enrollments, program fee, Actual GSV.
+       - “3.2 Conversion and acquisition efficiency”: L2W, L2A, L2E, W2A, A2E, CPL, CAC.
+       Compare the current batch with every selected Old Batch in the evidence (up to three old batches, four total). Include each selected batch as its own value column and comparison. Show absolute values in batch-value columns. Show percentage change for counts/costs and percentage-point (pp) change for rates. Arrow markers only: [[UP]] = green ↑ for positive mathematical change; [[DOWN]] = red ↓ for negative mathematical change. No circles/dots. Keep program fee neutral. Do not reverse arrows based on whether a metric is desirable; arrows indicate the sign of the change.
+    4. “Source-wise root-cause analysis”: provide a concise executive diagnosis followed by a source table that includes lead/application/enrollment contribution shares, funnel conversion rates, weakest stage versus the program blended benchmark, estimated enrollment gap versus the program blended L2E benchmark, impact priority, spend coverage, observed CPL and observed CAC. Use the supplied Python-computed impact estimates; do not recalculate them. Conversion ranking eligibility uses max(10 leads, 3% of program leads). Prioritize sources by estimated business impact, not merely lowest conversion. Explain that enrollment-gap estimates are counterfactual benchmarks, not causal attribution or guaranteed recoverable enrollments. Separate observed facts from hypotheses, and disclose incomplete spend coverage. Discuss volume contribution, conversion efficiency, commercial efficiency, and impact prioritization.
+    5. “Advisor-tenure mix”: include only if data is available. Rank tenure groups using equal-weight score (L2W + L2E) / 2; discuss top/bottom groups with lead volumes and clarify that associations do not establish causation. Add a brief 1–2 sentence experience interpretation directly under this section: lower tenure-month values mean more experienced advisors, while higher tenure-month values mean less experienced advisors. Relate the observed performance of the tenure groups to this experience scale only where the table supports it; do not infer causation.
+    6. “Prioritized actions”: give 3–5 actionable steps tied to findings, including what Finance/Marketing should validate when evidence cannot establish a cause.
+
+    RULES: Actual GSV = enrollments × program-level fee (fee repeats across source rows; use once). Planned_GSV is in crore units and must be converted to rupees × 10,000,000; label this assumption. Spend may be incomplete; describe CPL/CAC as observed-spend metrics. Rates are ratios; show percentage-point changes. Do not add a separate Metric Scorecard; the specifically requested “Where it went wrong” section is required and should not be duplicated elsewhere. Do not invent missing metrics or causal explanations. Use valid Markdown tables. Aim for moderate detail: useful interpretation, not a terse summary or a long essay.
+
+    EVIDENCE JSON:
+    {overall_payload}
+    """.strip()
+
+                            try:
+                                client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+                                model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
+                                response = client.responses.create(
                                     model=model,
                                     instructions=(
-                                        "Write only the missing Markdown section requested. "
-                                        "Use only the supplied evidence, do not invent values, "
-                                        "and return a section heading plus 4-5 concise points."
+                                        "You are a senior marketing analytics consultant. Follow the requested report "
+                                        "structure exactly. Return complete Markdown with numbered headings and valid Markdown "
+                                        "tables. Never invent metrics, history, or causes. Use N/A when evidence is unavailable."
                                     ),
-                                    input=(
-                                        f"Add a section titled 'Where it went wrong' for program {program_code}. "
-                                        "Include 4-5 evidence-backed points comparing plan vs actual and current "
-                                        "batch vs up to two prior batches where available. Include plan-attainment "
-                                        "and historical-comparison ratings only when evidence is sufficient. "
-                                        "Place this section after 'Executive Diagnosis + Summary of Reason'. "
-                                        "Do not repeat other sections.\n\nEVIDENCE JSON:\n"
-                                        + overall_payload
-                                    ),
-                                    max_output_tokens=1600,
+                                    input=overall_prompt,
+                                    max_output_tokens=5200,
                                     reasoning={"effort": "low"},
                                 )
-                                missing_section = (repair.output_text or "").strip()
-                                if missing_section:
-                                    # Insert directly after the first executive-diagnosis section block.
-                                    next_heading = re.search(r"(?m)^##?\\s+(?:2[.)]?\\s*)?(?:Plan vs Actual|Planned versus actual)", answer, re.I)
-                                    if next_heading:
-                                        answer = answer[:next_heading.start()].rstrip() + "\\n\\n" + missing_section + "\\n\\n" + answer[next_heading.start():]
-                                    else:
-                                        answer = answer.rstrip() + "\\n\\n" + missing_section
-                        except Exception:
-                            # Deterministic fallback remains available if AI is unavailable.
-                            answer = format_overall_program_fallback(overall_result)
+                                answer = (response.output_text or "").strip()
 
-                        answer = answer or format_overall_program_fallback(overall_result)
-                        section_statuses = build_section_performance_statuses(overall_result)
-                        answer = add_section_performance_statuses(answer, section_statuses)
-                        compared_batches = [
-                            x.get("program_code") for x in overall_result.get("batches", [])
-                        ]
-                        # Cache only a complete non-empty report. A GitHub outage does not
-                        # block the user; it simply means this result may not be shared.
-                        cache_saved = put_cached_report(
-                            cache_key,
-                            answer,
-                            metadata={
-                                "program_code": program_code,
-                                "compared_batches": [program_code] + selected_old_for_analysis,
-                                "selected_old_batches": selected_old_for_analysis,
+                                # Validate the required new section before caching the report.
+                                # If the model omits it, ask for only that missing section and insert it
+                                # immediately after the Executive Diagnosis section.
+                                if answer and "where it went wrong" not in answer.lower():
+                                    repair = client.responses.create(
+                                        model=model,
+                                        instructions=(
+                                            "Write only the missing Markdown section requested. "
+                                            "Use only the supplied evidence, do not invent values, "
+                                            "and return a section heading plus 4-5 concise points."
+                                        ),
+                                        input=(
+                                            f"Add a section titled 'Where it went wrong' for program {program_code}. "
+                                            "Include 4-5 evidence-backed points comparing plan vs actual and current "
+                                            "batch vs up to two prior batches where available. Include plan-attainment "
+                                            "and historical-comparison ratings only when evidence is sufficient. "
+                                            "Place this section after 'Executive Diagnosis + Summary of Reason'. "
+                                            "Do not repeat other sections.\n\nEVIDENCE JSON:\n"
+                                            + overall_payload
+                                        ),
+                                        max_output_tokens=1600,
+                                        reasoning={"effort": "low"},
+                                    )
+                                    missing_section = (repair.output_text or "").strip()
+                                    if missing_section:
+                                        # Insert directly after the first executive-diagnosis section block.
+                                        next_heading = re.search(r"(?m)^##?\\s+(?:2[.)]?\\s*)?(?:Plan vs Actual|Planned versus actual)", answer, re.I)
+                                        if next_heading:
+                                            answer = answer[:next_heading.start()].rstrip() + "\\n\\n" + missing_section + "\\n\\n" + answer[next_heading.start():]
+                                        else:
+                                            answer = answer.rstrip() + "\\n\\n" + missing_section
+                            except Exception:
+                                # Deterministic fallback remains available if AI is unavailable.
+                                answer = format_overall_program_fallback(overall_result)
+
+                            answer = answer or format_overall_program_fallback(overall_result)
+                            section_statuses = build_section_performance_statuses(overall_result)
+                            answer = add_section_performance_statuses(answer, section_statuses)
+                            compared_batches = [
+                                x.get("program_code") for x in overall_result.get("batches", [])
+                            ]
+                            # Cache only a complete non-empty report. A GitHub outage does not
+                            # block the user; it simply means this result may not be shared.
+                            cache_saved = put_cached_report(
+                                cache_key,
+                                answer,
+                                metadata={
+                                    "program_code": program_code,
+                                    "compared_batches": [program_code] + selected_old_for_analysis,
+                                    "selected_old_batches": selected_old_for_analysis,
+                                    "analysis_type": "Overall program analysis",
+                                    "prompt_version": "overall-program-prompt-v4-selected-batches-up-to-four",
+                                },
+                            )
+                            st.session_state.analysis_report = {
+                                "found": True,
                                 "analysis_type": "Overall program analysis",
-                                "prompt_version": "overall-program-prompt-v4-selected-batches-up-to-four",
-                            },
-                        )
-                        st.session_state.analysis_report = {
-                            "found": True,
-                            "analysis_type": "Overall program analysis",
-                            "program_code": program_code,
-                            "compared_batches": compared_batches,
-                            "cache_status": "saved" if cache_saved else "not_saved",
-                        }
-                        st.session_state.analysis_text = answer
+                                "program_code": program_code,
+                                "compared_batches": compared_batches,
+                                "cache_status": "saved" if cache_saved else "not_saved",
+                            }
+                            st.session_state.analysis_text = answer
 
-            except Exception as exc:
-                st.session_state.analysis_report = {
-                    "found": False,
-                    "analysis_type": "Overall program analysis",
-                    "message": str(exc),
-                }
-                st.session_state.analysis_text = None
-                st.error(f"Overall program analysis failed: {exc}")
+                except Exception as exc:
+                    st.session_state.analysis_report = {
+                        "found": False,
+                        "analysis_type": "Overall program analysis",
+                        "message": str(exc),
+                    }
+                    st.session_state.analysis_text = None
+                    st.error(f"Overall program analysis failed: {exc}")
 
-    elif analysis_type == "Batch Analysis":
+        elif analysis_type == "Batch Analysis":
 
-        if not old_batch_codes:
-            st.warning("Please select one or more Old Batches for comparison.")
-            st.stop()
+            if not old_batch_codes:
+                st.warning("Please select one or more Old Batches for comparison.")
+                st.stop()
 
-        with st.spinner("Analyzing the New Batch against your selected Old Batches..."):
-            try:
-                # Include exactly the user's selected old batches, up to three.
-                # Combined with the selected new batch, the report covers at most four batches.
-                selected_old_for_analysis = list(dict.fromkeys(
-                    code for code in old_batch_codes if code in old_options
-                ))[:3]
-                batch_result = analyze_batch_history(
-                    raw_df,
-                    program_code=program_code,
-                    max_batches=4,
-                    selected_old_batches=selected_old_for_analysis,
-                )
-                batch_markdown = format_batch_analysis_markdown(batch_result)
-                st.session_state.analysis_report = {
-                    "found": True,
-                    "analysis_type": "Batch Analysis",
-                    "program_code": program_code,
-                    "batch_lineage": batch_result.get("lineage_newest_first", []),
-                    "selected_old_batches": selected_old_for_analysis,
-                }
-                batch_payload = json.dumps(batch_result, ensure_ascii=False, indent=2, default=str)
-                # Keep the LLM context compact: the structured package is authoritative,
-                # while the deterministic Markdown remains available as a complete fallback.
-                prompt = f"""Create a concise, complete Batch Analysis for {program_code} using ONLY the JSON evidence below.
-
-Rules:
-- Python-calculated values are authoritative. Do not recalculate, invent numbers, or infer unsupported causes.
-- Compare only program_code values that actually exist in the supplied dataset and are present in the provided batches/lineage.
-- A previous_batch_code value that does not exist as a program_code is a dangling reference, NOT an available historical batch. Mention it only as "referenced but not found in dataset"; never add it as a batch row, metric column, or comparison.
-- Treat missing values as unavailable, not zero. Flag incomplete spend coverage and selling-window differences where relevant.
-- Separate observations from hypotheses; use pp for differences between percentages.
-- Use compact, valid Markdown tables only where they add value. Do not reproduce every metric multiple times.
-- Keep narrative concise: prioritize the largest quantified changes, persistent trends, reversals, plan gaps, and practical next actions.
-- Analyze exactly the batches selected by the user: the selected New Batch plus each selected Old Batch, capped at the first 3 selected Old Batches. The total must never exceed 4 batches. If the user selects 1, 2, or 3 Old Batches, analyze only those selected batches; do not add extra historical batches. If more than 3 Old Batches are submitted by stale state or another caller, use only the first 3 selected Old Batches. Planned-versus-actual comparisons must cover every included batch where plan data exists.
-- Explicitly analyze total_program_fee (or legacy total_program_fees, if present) as the program price point across batches: show fee changes in amount and percentage, and explain whether fee movement may affect GSV.
-- Explicitly include the deterministic GSV impact decomposition when available: enrollment-volume effect versus fee/price effect. State whether it reconciles to observed GSV change; if not, explain that the attribution is incomplete and do not overstate it.
-- Treat total_program_fee (or legacy total_program_fees) as a program-level value repeated across source rows, never sum it across rows.
-
-Include all nine sections, with these exact headings:
-1. Executive diagnosis
-2. Batch lineage and comparability
-3. Multi-batch performance scorecard
-4. Metric-by-metric historical trends
-5. Planned vs actual across batches
-6. Price-point, GSV impact, hidden patterns and likely drivers
-7. Root-cause hypotheses ranked by impact and confidence
-8. Recommended actions
-9. Final business conclusion
-
-Deterministic evidence (JSON):
-{batch_payload}
-"""
+            with st.spinner("Analyzing the New Batch against your selected Old Batches..."):
                 try:
+                    # Include exactly the user's selected old batches, up to three.
+                    # Combined with the selected new batch, the report covers at most four batches.
+                    selected_old_for_analysis = list(dict.fromkeys(
+                        code for code in old_batch_codes if code in old_options
+                    ))[:3]
+                    batch_result = analyze_batch_history(
+                        raw_df,
+                        program_code=program_code,
+                        max_batches=4,
+                        selected_old_batches=selected_old_for_analysis,
+                    )
+                    batch_markdown = format_batch_analysis_markdown(batch_result)
+                    st.session_state.analysis_report = {
+                        "found": True,
+                        "analysis_type": "Batch Analysis",
+                        "program_code": program_code,
+                        "batch_lineage": batch_result.get("lineage_newest_first", []),
+                        "selected_old_batches": selected_old_for_analysis,
+                    }
+                    batch_payload = json.dumps(batch_result, ensure_ascii=False, indent=2, default=str)
+                    # Keep the LLM context compact: the structured package is authoritative,
+                    # while the deterministic Markdown remains available as a complete fallback.
+                    prompt = f"""Create a concise, complete Batch Analysis for {program_code} using ONLY the JSON evidence below.
+
+    Rules:
+    - Python-calculated values are authoritative. Do not recalculate, invent numbers, or infer unsupported causes.
+    - Compare only program_code values that actually exist in the supplied dataset and are present in the provided batches/lineage.
+    - A previous_batch_code value that does not exist as a program_code is a dangling reference, NOT an available historical batch. Mention it only as "referenced but not found in dataset"; never add it as a batch row, metric column, or comparison.
+    - Treat missing values as unavailable, not zero. Flag incomplete spend coverage and selling-window differences where relevant.
+    - Separate observations from hypotheses; use pp for differences between percentages.
+    - Use compact, valid Markdown tables only where they add value. Do not reproduce every metric multiple times.
+    - Keep narrative concise: prioritize the largest quantified changes, persistent trends, reversals, plan gaps, and practical next actions.
+    - Analyze exactly the batches selected by the user: the selected New Batch plus each selected Old Batch, capped at the first 3 selected Old Batches. The total must never exceed 4 batches. If the user selects 1, 2, or 3 Old Batches, analyze only those selected batches; do not add extra historical batches. If more than 3 Old Batches are submitted by stale state or another caller, use only the first 3 selected Old Batches. Planned-versus-actual comparisons must cover every included batch where plan data exists.
+    - Explicitly analyze total_program_fee (or legacy total_program_fees, if present) as the program price point across batches: show fee changes in amount and percentage, and explain whether fee movement may affect GSV.
+    - Explicitly include the deterministic GSV impact decomposition when available: enrollment-volume effect versus fee/price effect. State whether it reconciles to observed GSV change; if not, explain that the attribution is incomplete and do not overstate it.
+    - Treat total_program_fee (or legacy total_program_fees) as a program-level value repeated across source rows, never sum it across rows.
+
+    Include all nine sections, with these exact headings:
+    1. Executive diagnosis
+    2. Batch lineage and comparability
+    3. Multi-batch performance scorecard
+    4. Metric-by-metric historical trends
+    5. Planned vs actual across batches
+    6. Price-point, GSV impact, hidden patterns and likely drivers
+    7. Root-cause hypotheses ranked by impact and confidence
+    8. Recommended actions
+    9. Final business conclusion
+
+    Deterministic evidence (JSON):
+    {batch_payload}
+    """
+                    try:
+                        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+                        model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
+                        response = client.responses.create(
+                            model=model,
+                            instructions=(
+                                "Return a complete executive-ready Batch Analysis in Markdown. "
+                                "Include all nine required sections and properly rendered Markdown tables. Include program-fee trends and GSV impact decomposition in section 6 when data supports it. "
+                                "Never omit sections; never invent numbers or causal claims."
+                            ),
+                            input=prompt,
+                            max_output_tokens=4500,
+                        )
+                        generated = (response.output_text or "").strip()
+                        required = [
+                            "Executive diagnosis", "Batch lineage and comparability", "Multi-batch performance scorecard",
+                            "Metric-by-metric historical trends", "Planned vs actual across batches",
+                            "Price-point, GSV impact, hidden patterns and likely drivers", "Root-cause hypotheses ranked by impact and confidence",
+                            "Recommended actions", "Final business conclusion",
+                        ]
+                        if generated and all(section.lower() in generated.lower() for section in required):
+                            st.session_state.analysis_text = generated
+                        else:
+                            st.session_state.analysis_text = batch_markdown
+                            if generated:
+                                st.warning("The generated narrative omitted required sections, so the complete deterministic report is shown instead.")
+                    except Exception:
+                        st.session_state.analysis_text = batch_markdown
+                except Exception as exc:
+                    st.session_state.analysis_report = {
+                        "found": False, "analysis_type": "Batch Analysis", "message": str(exc)
+                    }
+                    st.session_state.analysis_text = None
+                    st.error(f"Batch analysis failed: {exc}")
+
+        elif not old_batch_code:
+
+            st.warning(
+                "Please select an Old Batch for comparison."
+            )
+
+        else:
+
+            with st.spinner(
+                "Validating source data and generating source-wise diagnosis..."
+            ):
+
+                try:
+
+                    # Use the unified raw dataset so missing source values and
+                    # spend gaps are preserved for the data-quality checks.
+                    source_result = analyze_sources(
+                        raw_df,
+                        program_code=program_code,
+                        previous_batch_code=old_batch_code,
+                    )
+
+                    st.session_state.source_analysis_result = source_result
+                    st.session_state.analysis_report = {
+                        "found": True,
+                        "analysis_type": "Source analysis",
+                        "program_code": program_code,
+                        "previous_batch_code": old_batch_code,
+                    }
+
+                    # Send only the deterministic structured results to the LLM;
+                    # omit the DataFrame object used for the display table.
+                    source_payload = {
+                        key: value
+                        for key, value in source_result.items()
+                        if key != "table"
+                    }
+
+                    source_context = json.dumps(
+                        source_payload,
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    )
+
+                    source_report_prompt = f"""
+    ROLE: Senior Marketing Performance and Growth Analytics Consultant.
+
+    TASK:
+    Write an executive-ready source-wise diagnostic report for selected program
+    {program_code}, comparing it with previous batch {old_batch_code}.
+    Do NOT include a standalone section titled "Data quality and comparability".
+    Mention material data limitations briefly in the relevant section or as a short
+    final note only when they affect interpretation.
+
+    AUTHORITATIVE INPUT:
+    The deterministic Python source-analysis engine has already validated and
+    calculated the attached JSON. Treat its metrics, comparisons, data-quality
+    notes, and assumptions as the authoritative numerical evidence. Do not
+    recalculate or invent missing metrics. Do not treat unavailable values as zero.
+    Do not attribute repeated program-level paid metrics to individual sources.
+    Clearly distinguish source-level results from program-level paid metrics.
+
+    ANALYTICAL RULES:
+    - Validate data quality and batch comparability internally before interpreting results, but do not create a standalone Data quality and comparability section.
+    - Identify strongest and weakest sources using scale, conversion, economics,
+      plan attainment, historical momentum, business impact, and data reliability.
+    - Diagnose lead qualification, warm-lead-to-application, application-to-
+      enrollment, and lead-to-enrollment conversion.
+    - Quantify source contributions to changes only where the provided results
+      support the calculation. Separate observations from counterfactual estimates.
+    - Assess plans only where valid source-level plans are supplied.
+    - Do not claim causal attribution from observational data.
+    - Every major finding should state evidence, interpretation, impact if
+      calculable, confidence (high/medium/low), and missing evidence/assumptions.
+    - Recommendations should state issue, evidence, plausible explanation,
+      action, success metric, and evaluation method. Do not invent targets,
+      budget amounts, expected gains, owners, or deadlines.
+    - If the JSON does not contain a required calculation, state the limitation.
+
+    REPORT STRUCTURE — use exactly these eight sections in this order:
+    1. Executive diagnosis
+    2. Source performance scorecard
+    3. Funnel diagnostics
+    4. Previous-batch performance bridge
+    5. Planned vs actual performance
+    6. Paid vs non-paid performance
+    7. Prioritized root causes and recommended actions
+    8. Final business conclusion
+
+    Planned vs actual performance must compare each source's actual leads,
+    applications, enrollments, GSV and spend with its valid plan, showing actual,
+    plan, absolute variance and variance percentage in a Markdown table. Also
+    include the program-level paid plan vs paid actual comparison when available.
+    Do not classify missing plans as underperformance.
+
+    Paid vs non-paid performance must use the deterministic paid_vs_non_paid
+    object. Compare current and previous paid vs non-paid leads, enrollments, GSV,
+    spend, CAC/CPL and GSV-to-spend efficiency where valid. Include actual vs plan
+    for paid and non-paid segments where the supplied plan data supports it. State
+    clearly that matching paid fields are not supplied for applications or warm
+    leads, so do not invent that split. Do not attribute repeated program-level
+    paid metrics to individual source rows. If a split is unavailable due to missing
+    spend or inconsistent totals, show N/A and explain briefly.
+
+    Write precisely and commercially. Lead with business implications, use tables
+    for comparisons, avoid repetition, and keep facts separate from hypotheses.
+
+    DETERMINISTIC SOURCE-ANALYSIS PACKAGE:
+    {source_context}
+    """.strip()
+
+                    # Generate this report directly, without the legacy tool-calling
+                    # agent wrapper. That wrapper can divert the request into old
+                    # program diagnostics and return an incomplete/non-source report.
                     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
                     model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
                     response = client.responses.create(
                         model=model,
                         instructions=(
-                            "Return a complete executive-ready Batch Analysis in Markdown. "
-                            "Include all nine required sections and properly rendered Markdown tables. Include program-fee trends and GSV impact decomposition in section 6 when data supports it. "
-                            "Never omit sections; never invent numbers or causal claims."
+                            "You are a senior marketing performance and growth analytics consultant. "
+                            "Follow the user's report structure exactly. Return complete Markdown, "
+                            "with all eight sections and real Markdown tables. Do not output pipe-delimited "
+                            "rows as plain text. Never omit a section. If evidence is unavailable, "
+                            "include the section and explicitly state the limitation."
                         ),
-                        input=prompt,
-                        max_output_tokens=4500,
+                        input=source_report_prompt + "\n\nOUTPUT REQUIREMENTS:\n"
+                        "- Include all nine numbered sections, each with a Markdown heading.\n"
+                        "- Use Markdown tables for scorecards, bridges, plan comparisons, and priorities.\n"
+                        "- Keep each table row and column properly separated with pipes and include a separator row.\n"
+                        "- Complete every section; do not stop after the first few sections.\n"
+                        "- Use specific calculated values from the JSON, with unavailable values shown as N/A.\n"
+                        "- Avoid duplicating the entire input JSON in the report.",
+                        max_output_tokens=9000,
                     )
-                    generated = (response.output_text or "").strip()
-                    required = [
-                        "Executive diagnosis", "Batch lineage and comparability", "Multi-batch performance scorecard",
-                        "Metric-by-metric historical trends", "Planned vs actual across batches",
-                        "Price-point, GSV impact, hidden patterns and likely drivers", "Root-cause hypotheses ranked by impact and confidence",
-                        "Recommended actions", "Final business conclusion",
+                    answer = (response.output_text or "").strip()
+
+                    # Verify all required sections. If the first response was cut
+                    # short, ask the model to finish the missing sections.
+                    required_sections = [
+                        "Executive diagnosis",
+                        "Source performance scorecard",
+                        "Funnel diagnostics",
+                        "Previous-batch performance bridge",
+                        "Planned vs actual performance",
+                        "Paid vs non-paid performance",
+                        "Prioritized root causes and recommended actions",
+                        "Final business conclusion",
                     ]
-                    if generated and all(section.lower() in generated.lower() for section in required):
-                        st.session_state.analysis_text = generated
-                    else:
-                        st.session_state.analysis_text = batch_markdown
-                        if generated:
-                            st.warning("The generated narrative omitted required sections, so the complete deterministic report is shown instead.")
-                except Exception:
-                    st.session_state.analysis_text = batch_markdown
-            except Exception as exc:
-                st.session_state.analysis_report = {
-                    "found": False, "analysis_type": "Batch Analysis", "message": str(exc)
-                }
-                st.session_state.analysis_text = None
-                st.error(f"Batch analysis failed: {exc}")
-
-    elif not old_batch_code:
-
-        st.warning(
-            "Please select an Old Batch for comparison."
-        )
-
-    else:
-
-        with st.spinner(
-            "Validating source data and generating source-wise diagnosis..."
-        ):
-
-            try:
-
-                # Use the unified raw dataset so missing source values and
-                # spend gaps are preserved for the data-quality checks.
-                source_result = analyze_sources(
-                    raw_df,
-                    program_code=program_code,
-                    previous_batch_code=old_batch_code,
-                )
-
-                st.session_state.source_analysis_result = source_result
-                st.session_state.analysis_report = {
-                    "found": True,
-                    "analysis_type": "Source analysis",
-                    "program_code": program_code,
-                    "previous_batch_code": old_batch_code,
-                }
-
-                # Send only the deterministic structured results to the LLM;
-                # omit the DataFrame object used for the display table.
-                source_payload = {
-                    key: value
-                    for key, value in source_result.items()
-                    if key != "table"
-                }
-
-                source_context = json.dumps(
-                    source_payload,
-                    ensure_ascii=False,
-                    indent=2,
-                    default=str,
-                )
-
-                source_report_prompt = f"""
-ROLE: Senior Marketing Performance and Growth Analytics Consultant.
-
-TASK:
-Write an executive-ready source-wise diagnostic report for selected program
-{program_code}, comparing it with previous batch {old_batch_code}.
-Do NOT include a standalone section titled "Data quality and comparability".
-Mention material data limitations briefly in the relevant section or as a short
-final note only when they affect interpretation.
-
-AUTHORITATIVE INPUT:
-The deterministic Python source-analysis engine has already validated and
-calculated the attached JSON. Treat its metrics, comparisons, data-quality
-notes, and assumptions as the authoritative numerical evidence. Do not
-recalculate or invent missing metrics. Do not treat unavailable values as zero.
-Do not attribute repeated program-level paid metrics to individual sources.
-Clearly distinguish source-level results from program-level paid metrics.
-
-ANALYTICAL RULES:
-- Validate data quality and batch comparability internally before interpreting results, but do not create a standalone Data quality and comparability section.
-- Identify strongest and weakest sources using scale, conversion, economics,
-  plan attainment, historical momentum, business impact, and data reliability.
-- Diagnose lead qualification, warm-lead-to-application, application-to-
-  enrollment, and lead-to-enrollment conversion.
-- Quantify source contributions to changes only where the provided results
-  support the calculation. Separate observations from counterfactual estimates.
-- Assess plans only where valid source-level plans are supplied.
-- Do not claim causal attribution from observational data.
-- Every major finding should state evidence, interpretation, impact if
-  calculable, confidence (high/medium/low), and missing evidence/assumptions.
-- Recommendations should state issue, evidence, plausible explanation,
-  action, success metric, and evaluation method. Do not invent targets,
-  budget amounts, expected gains, owners, or deadlines.
-- If the JSON does not contain a required calculation, state the limitation.
-
-REPORT STRUCTURE — use exactly these eight sections in this order:
-1. Executive diagnosis
-2. Source performance scorecard
-3. Funnel diagnostics
-4. Previous-batch performance bridge
-5. Planned vs actual performance
-6. Paid vs non-paid performance
-7. Prioritized root causes and recommended actions
-8. Final business conclusion
-
-Planned vs actual performance must compare each source's actual leads,
-applications, enrollments, GSV and spend with its valid plan, showing actual,
-plan, absolute variance and variance percentage in a Markdown table. Also
-include the program-level paid plan vs paid actual comparison when available.
-Do not classify missing plans as underperformance.
-
-Paid vs non-paid performance must use the deterministic paid_vs_non_paid
-object. Compare current and previous paid vs non-paid leads, enrollments, GSV,
-spend, CAC/CPL and GSV-to-spend efficiency where valid. Include actual vs plan
-for paid and non-paid segments where the supplied plan data supports it. State
-clearly that matching paid fields are not supplied for applications or warm
-leads, so do not invent that split. Do not attribute repeated program-level
-paid metrics to individual source rows. If a split is unavailable due to missing
-spend or inconsistent totals, show N/A and explain briefly.
-
-Write precisely and commercially. Lead with business implications, use tables
-for comparisons, avoid repetition, and keep facts separate from hypotheses.
-
-DETERMINISTIC SOURCE-ANALYSIS PACKAGE:
-{source_context}
-""".strip()
-
-                # Generate this report directly, without the legacy tool-calling
-                # agent wrapper. That wrapper can divert the request into old
-                # program diagnostics and return an incomplete/non-source report.
-                client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-                model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
-                response = client.responses.create(
-                    model=model,
-                    instructions=(
-                        "You are a senior marketing performance and growth analytics consultant. "
-                        "Follow the user's report structure exactly. Return complete Markdown, "
-                        "with all eight sections and real Markdown tables. Do not output pipe-delimited "
-                        "rows as plain text. Never omit a section. If evidence is unavailable, "
-                        "include the section and explicitly state the limitation."
-                    ),
-                    input=source_report_prompt + "\n\nOUTPUT REQUIREMENTS:\n"
-                    "- Include all nine numbered sections, each with a Markdown heading.\n"
-                    "- Use Markdown tables for scorecards, bridges, plan comparisons, and priorities.\n"
-                    "- Keep each table row and column properly separated with pipes and include a separator row.\n"
-                    "- Complete every section; do not stop after the first few sections.\n"
-                    "- Use specific calculated values from the JSON, with unavailable values shown as N/A.\n"
-                    "- Avoid duplicating the entire input JSON in the report.",
-                    max_output_tokens=9000,
-                )
-                answer = (response.output_text or "").strip()
-
-                # Verify all required sections. If the first response was cut
-                # short, ask the model to finish the missing sections.
-                required_sections = [
-                    "Executive diagnosis",
-                    "Source performance scorecard",
-                    "Funnel diagnostics",
-                    "Previous-batch performance bridge",
-                    "Planned vs actual performance",
-                    "Paid vs non-paid performance",
-                    "Prioritized root causes and recommended actions",
-                    "Final business conclusion",
-                ]
-                normalized_answer = answer.lower()
-                missing_sections = [
-                    title for title in required_sections
-                    if title.lower() not in normalized_answer
-                ]
-                if missing_sections:
-                    completion = client.responses.create(
-                        model=model,
-                        instructions=(
-                            "Complete an executive-ready source-wise diagnostic report. "
-                            "Return only the missing sections as valid Markdown. Use the supplied "
-                            "JSON as authoritative evidence; do not invent values or causes. Use Markdown tables."
-                        ),
-                        input=(
-                            "The report started below but omitted these required sections: "
-                            + ", ".join(missing_sections)
-                            + "\n\nExisting report (do not repeat it):\n" + answer
-                            + "\n\nOriginal deterministic source analysis and report requirements:\n"
-                            + source_report_prompt
-                        ),
-                        max_output_tokens=6000,
-                    )
-                    completion_text = (completion.output_text or "").strip()
-                    if completion_text:
-                        answer = answer.rstrip() + "\n\n" + completion_text
-
-                if not answer:
-                    answer = format_source_analysis_markdown(source_result)
-
-                st.session_state.analysis_text = answer
-
-            except Exception as exc:
-
-                st.session_state.analysis_report = {
-                    "found": False,
-                    "analysis_type": "Source analysis",
-                    "message": str(exc),
-                }
-                st.session_state.analysis_text = None
-                st.session_state.source_analysis_result = None
-                st.error(f"Source analysis failed: {exc}")
-
-
-# =========================================================
-# PERFORMANCE CARDS
-# =========================================================
-
-if program_code and analysis_type not in {"Source analysis", "Batch Analysis", "Overall program analysis"}:
-
-    performance = get_check_tool_performance(
-        check_df,
-        program_code,
-    )
-
-
-    if performance:
-
-        render_performance_report(
-            performance=performance,
-            program_code=program_code,
-            old_batch_code=old_batch_code,
-        )
-
-
-# =========================================================
-# SOURCE-WISE HISTORICAL BATCH POPUP
-# =========================================================
-
-def show_other_batch_source_tables():
-    """Show a short evidence-based source diagnosis and table for each selected historical batch."""
-    @st.dialog("Source-wise analysis — other selected batches", width="large")
-    def _dialog():
-        batch_codes = st.session_state.get("source_popup_batches", [])[:3]
-        if not batch_codes:
-            st.info("No historical batches were selected.")
-            return
-
-        st.caption(
-            "Each batch includes a short source-level diagnosis followed by its source table. "
-            "The current New Batch source table remains in the main report."
-        )
-
-        def num_sum(series):
-            return pd.to_numeric(series, errors="coerce").sum(min_count=1)
-
-        def ratio(numerator, denominator):
-            if pd.isna(numerator) or pd.isna(denominator) or denominator == 0:
-                return None
-            return numerator / denominator * 100
-
-        def fmt_pct(value):
-            return f"{value:.2f}%" if value is not None and pd.notna(value) else "N/A"
-
-        def fmt_money(value):
-            return f"₹{value:,.2f}" if value is not None and pd.notna(value) else "N/A"
-
-        for batch_code in batch_codes:
-            batch_rows = raw_df[
-                raw_df["program_code"].astype(str).str.strip().eq(str(batch_code).strip())
-            ].copy()
-            st.markdown(f"### {batch_code}")
-
-            if batch_rows.empty:
-                st.info(f"No source-level rows were found for {batch_code}.")
-                continue
-            if "source_created" not in batch_rows.columns:
-                st.warning("Source column `source_created` is not available in this dataset.")
-                continue
-
-            records = []
-            for source, group in batch_rows.groupby("source_created", dropna=False):
-                leads = num_sum(group["leads"]) if "leads" in group else None
-                warm = num_sum(group["warm_leads"]) if "warm_leads" in group else None
-                apps = num_sum(group["applications"]) if "applications" in group else None
-                enrollments = num_sum(group["enrollments"]) if "enrollments" in group else None
-                spend = num_sum(group["spends"]) if "spends" in group else None
-                records.append({
-                    "Source": str(source) if pd.notna(source) else "Unknown",
-                    "Leads": leads,
-                    "Warm leads": warm,
-                    "Applications": apps,
-                    "Enrollments": enrollments,
-                    "L2W": ratio(warm, leads),
-                    "L2A": ratio(apps, leads),
-                    "W2A": ratio(apps, warm),
-                    "L2E": ratio(enrollments, leads),
-                    "A2E": ratio(enrollments, apps),
-                    "Observed spend": spend,
-                    "CPL": spend / leads if pd.notna(spend) and pd.notna(leads) and leads else None,
-                    "CAC": spend / enrollments if pd.notna(spend) and pd.notna(enrollments) and enrollments else None,
-                })
-
-            table = pd.DataFrame(records)
-            if table.empty:
-                st.info(f"No source rows are available for {batch_code}.")
-                continue
-
-            # Calculate metrics deterministically in Python. Only the 2-3 line
-            # narrative below is generated by the LLM and cached per batch/data version.
-            total_leads = num_sum(table["Leads"])
-            total_warm = num_sum(table["Warm leads"])
-            total_apps = num_sum(table["Applications"])
-            total_enrollments = num_sum(table["Enrollments"])
-            total_spend = num_sum(table["Observed spend"])
-            overall_l2a = ratio(total_apps, total_leads)
-            overall_l2e = ratio(total_enrollments, total_leads)
-            overall_w2a = ratio(total_apps, total_warm)
-            spend_coverage = int(table["Observed spend"].notna().sum())
-            source_count = len(table)
-            # Contribution and impact calculations are deterministic Python outputs.
-            for metric_col, share_col in [("Leads", "Lead share"), ("Applications", "Application share"), ("Enrollments", "Enrollment share")]:
-                denom = num_sum(table[metric_col])
-                table[share_col] = (table[metric_col] / denom * 100) if pd.notna(denom) and denom != 0 else None
-            min_leads_for_rank = max(10.0, (float(total_leads) if pd.notna(total_leads) else 0.0) * 0.03)
-            table["Ranking eligible"] = table["Leads"].ge(min_leads_for_rank)
-            benchmark_l2e = (total_enrollments / total_leads) if pd.notna(total_enrollments) and pd.notna(total_leads) and total_leads else None
-            table["Expected enrolments at program L2E"] = table["Leads"] * benchmark_l2e if benchmark_l2e is not None else None
-            table["Enrolment gap vs benchmark"] = (table["Expected enrolments at program L2E"] - table["Enrollments"]).clip(lower=0) if benchmark_l2e is not None else None
-            total_positive_gap = table["Enrolment gap vs benchmark"].sum(min_count=1)
-            table["Share of estimated gap"] = table["Enrolment gap vs benchmark"] / total_positive_gap * 100 if pd.notna(total_positive_gap) and total_positive_gap > 0 else None
-            table["Impact priority"] = table["Enrolment gap vs benchmark"].apply(lambda x: "High" if pd.notna(x) and x >= 2 else ("Medium" if pd.notna(x) and x >= 0.5 else ("Low" if pd.notna(x) else "N/A")))
-            table.loc[~table["Ranking eligible"], "Impact priority"] = "Not ranked (low volume)"
-            table["Spend coverage"] = table["Observed spend"].apply(lambda x: "Available" if pd.notna(x) else "Missing")
-            program_rates = {"L2W": ratio(total_warm, total_leads), "L2A": overall_l2a, "W2A": overall_w2a,
-                             "A2E": ratio(total_enrollments, total_apps)}
-            def weakest_stage(row):
-                gaps = []
-                for stage, col, denominator in [("L2W", "L2W", "Leads"), ("W2A", "W2A", "Warm leads"), ("A2E", "A2E", "Applications")]:
-                    own = row.get(col)
-                    benchmark = program_rates.get(stage)
-                    if pd.notna(own) and benchmark is not None:
-                        gaps.append((stage, float(own) - float(benchmark)))
-                return min(gaps, key=lambda item: item[1])[0] if gaps else "N/A"
-            table["Weakest stage vs program"] = table.apply(weakest_stage, axis=1)
-
-            lead_source = table.loc[table["Leads"].fillna(0).idxmax()] if source_count else None
-            enrollment_source = table.loc[table["Enrollments"].fillna(0).idxmax()] if source_count else None
-            l2a_candidates = table[table["Leads"].fillna(0) >= max(10, total_leads * 0.03)]
-            weakest_l2a = l2a_candidates.loc[l2a_candidates["L2A"].idxmin()] if not l2a_candidates.empty and l2a_candidates["L2A"].notna().any() else None
-            best_l2a = l2a_candidates.loc[l2a_candidates["L2A"].idxmax()] if not l2a_candidates.empty and l2a_candidates["L2A"].notna().any() else None
-
-            # Prepare compact evidence from Python-computed metrics. The LLM is
-            # explicitly limited to a 2-3 sentence interpretation; it must not
-            # recalculate or invent values.
-            source_evidence = []
-            for _, row in table.iterrows():
-                source_evidence.append({
-                    "source": row["Source"],
-                    "leads": None if pd.isna(row["Leads"]) else int(row["Leads"]),
-                    "warm_leads": None if pd.isna(row["Warm leads"]) else int(row["Warm leads"]),
-                    "applications": None if pd.isna(row["Applications"]) else int(row["Applications"]),
-                    "enrollments": None if pd.isna(row["Enrollments"]) else int(row["Enrollments"]),
-                    "L2W_pct": None if pd.isna(row["L2W"]) else round(float(row["L2W"]), 2),
-                    "L2A_pct": None if pd.isna(row["L2A"]) else round(float(row["L2A"]), 2),
-                    "W2A_pct": None if pd.isna(row["W2A"]) else round(float(row["W2A"]), 2),
-                    "L2E_pct": None if pd.isna(row["L2E"]) else round(float(row["L2E"]), 2),
-                    "A2E_pct": None if pd.isna(row["A2E"]) else round(float(row["A2E"]), 2),
-                    "observed_spend": None if pd.isna(row["Observed spend"]) else round(float(row["Observed spend"]), 2),
-                    "CPL": None if pd.isna(row["CPL"]) else round(float(row["CPL"]), 2),
-                    "CAC": None if pd.isna(row["CAC"]) else round(float(row["CAC"]), 2),
-                    "lead_share_pct": None if pd.isna(row["Lead share"]) else round(float(row["Lead share"]), 2),
-                    "application_share_pct": None if pd.isna(row["Application share"]) else round(float(row["Application share"]), 2),
-                    "enrollment_share_pct": None if pd.isna(row["Enrollment share"]) else round(float(row["Enrollment share"]), 2),
-                    "weakest_stage_vs_program": row["Weakest stage vs program"],
-                    "estimated_enrollment_gap_vs_program_L2E": None if pd.isna(row["Enrolment gap vs benchmark"]) else round(float(row["Enrolment gap vs benchmark"]), 2),
-                    "impact_priority": row["Impact priority"],
-                    "spend_coverage": row["Spend coverage"],
-                })
-
-            narrative_key = make_cache_key(
-                program_code=str(batch_code),
-                primary_data_path=APP_DIR / "data" / "Program Batch Data.csv",
-                advisor_data_path=APP_DIR / "data" / "Advisor Mix.csv",
-                prompt_version="source-wise-batch-narrative-v2-impact-prioritization",
-                selected_old_batches=[],
-            )
-            narrative = None
-            try:
-                with get_process_lock(narrative_key):
-                    cached_narrative = get_cached_report(narrative_key)
-                    if cached_narrative and cached_narrative.get("report"):
-                        narrative = str(cached_narrative["report"]).strip()
-                    else:
-                        from openai import OpenAI
-                        import json as _json
-
-                        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-                        model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
-                        payload = {
-                            "batch": str(batch_code),
-                            "totals": {
-                                "leads": None if pd.isna(total_leads) else int(total_leads),
-                                "warm_leads": None if pd.isna(total_warm) else int(total_warm),
-                                "applications": None if pd.isna(total_apps) else int(total_apps),
-                                "enrollments": None if pd.isna(total_enrollments) else int(total_enrollments),
-                                "L2W_pct": None if pd.isna(ratio(total_warm, total_leads)) else round(ratio(total_warm, total_leads), 2),
-                                "L2A_pct": None if pd.isna(overall_l2a) else round(overall_l2a, 2),
-                                "W2A_pct": None if pd.isna(overall_w2a) else round(overall_w2a, 2),
-                                "L2E_pct": None if pd.isna(overall_l2e) else round(overall_l2e, 2),
-                                "observed_spend_sum_of_available_sources": None if pd.isna(total_spend) else round(float(total_spend), 2),
-                                "sources_with_spend": spend_coverage,
-                                "source_count": source_count,
-                                "spend_coverage_pct": round(spend_coverage / source_count * 100, 2) if source_count else None,
-                                "impact_method": "max(0, source leads × program blended L2E − source enrollments); counterfactual prioritization only",
-                            },
-                            "source_metrics": source_evidence,
-                        }
-                        response = client.responses.create(
+                    normalized_answer = answer.lower()
+                    missing_sections = [
+                        title for title in required_sections
+                        if title.lower() not in normalized_answer
+                    ]
+                    if missing_sections:
+                        completion = client.responses.create(
                             model=model,
                             instructions=(
-                                "You are a senior marketing performance analyst. Write exactly 2-3 concise "
-                                "sentences for the source-wise root-cause analysis of this batch. Use only the "
-                                "provided computed evidence. Identify meaningful source-level strengths and "
-                                "weaknesses, contribution shares, weakest funnel stages, impact priorities, and spend-data limitations "
-                                "where relevant. Prioritize sources by estimated enrollment gap rather than lowest rate alone. "
-                                "Explain that benchmark gaps are counterfactual, not causal or guaranteed recoverable. Cite specific source names and numbers from the payload. "
-                                "Do not recalculate metrics, invent targets, claim causes not demonstrated by "
-                                "the data, or imply missing spend is zero. Distinguish observations from hypotheses. "
-                                "Return only the 2-3 sentence paragraph, no heading or bullets."
+                                "Complete an executive-ready source-wise diagnostic report. "
+                                "Return only the missing sections as valid Markdown. Use the supplied "
+                                "JSON as authoritative evidence; do not invent values or causes. Use Markdown tables."
                             ),
-                            input=_json.dumps(payload, ensure_ascii=False),
+                            input=(
+                                "The report started below but omitted these required sections: "
+                                + ", ".join(missing_sections)
+                                + "\n\nExisting report (do not repeat it):\n" + answer
+                                + "\n\nOriginal deterministic source analysis and report requirements:\n"
+                                + source_report_prompt
+                            ),
+                            max_output_tokens=6000,
                         )
-                        narrative = (getattr(response, "output_text", "") or "").strip()
-                        if narrative:
-                            put_cached_report(
-                                narrative_key,
-                                narrative,
-                                metadata={
-                                    "analysis_type": "Source-wise batch narrative",
-                                    "program_code": str(batch_code),
-                                    "prompt_version": "source-wise-batch-narrative-v2-impact-prioritization",
-                                },
-                            )
-            except Exception:
-                # The table remains available if the LLM/cache service is unavailable.
-                narrative = None
+                        completion_text = (completion.output_text or "").strip()
+                        if completion_text:
+                            answer = answer.rstrip() + "\n\n" + completion_text
 
-            if narrative:
-                st.markdown(narrative)
-            else:
-                st.info(
-                    "A batch-specific LLM narrative is temporarily unavailable. "
-                    "The source metrics below are still calculated directly from the data."
-                )
+                    if not answer:
+                        answer = format_source_analysis_markdown(source_result)
 
-            table = table.sort_values("Enrolment gap vs benchmark", ascending=False, na_position="last")
-            for column in ["L2W", "L2A", "W2A", "L2E", "A2E"]:
-                table[column] = table[column].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-            for column in ["Observed spend", "CPL", "CAC"]:
-                table[column] = table[column].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
-            for column in ["Lead share", "Application share", "Enrollment share", "Share of estimated gap"]:
-                table[column] = table[column].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-            for column in ["Expected enrolments at program L2E", "Enrolment gap vs benchmark"]:
-                table[column] = table[column].map(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
-            for column in ["Leads", "Warm leads", "Applications", "Enrollments"]:
-                table[column] = table[column].map(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A")
-            st.dataframe(table, width="stretch", hide_index=True)
+                    st.session_state.analysis_text = answer
 
-    _dialog()
+                except Exception as exc:
+
+                    st.session_state.analysis_report = {
+                        "found": False,
+                        "analysis_type": "Source analysis",
+                        "message": str(exc),
+                    }
+                    st.session_state.analysis_text = None
+                    st.session_state.source_analysis_result = None
+                    st.error(f"Source analysis failed: {exc}")
 
 
-# =========================================================
-# AI BUSINESS DIAGNOSIS
-# =========================================================
+    # =========================================================
+    # PERFORMANCE CARDS
+    # =========================================================
 
-if st.session_state.analysis_text:
+    if program_code and analysis_type not in {"Source analysis", "Batch Analysis", "Overall program analysis"}:
 
-    render_ai_diagnosis(
-        st.session_state.analysis_text
-    )
-
-
-# =========================================================
-# CHAT SECTION
-# =========================================================
-
-render_html(
-    """
-    <div class="chat-shell">
-
-        <div class="chat-heading">
-            Chat with Agent
-        </div>
-
-        <div class="chat-description">
-            Ask follow-up questions about programs, batches,
-            sources, CAC, CPL, funnel performance,
-            plan variance, or business drivers.
-        </div>
-
-    </div>
-    """
-)
-
-
-# =========================================================
-# OPTIMAL LAUNCH METRICS (SEPARATE MODULE; EXISTING UI OTHERWISE UNCHANGED)
-# =========================================================
-
-from optimal_launch_metrics import render_optimal_launch_metrics
-
-render_optimal_launch_metrics(
-    st=st,
-    raw_df=raw_df,
-    selected_code=program_code,
-)
-
-
-
-
-# =========================================================
-# CHAT DATA SOURCES: GITHUB CACHED REPORT + EXCEL WORKBOOKS
-# =========================================================
-
-def _chat_dataframe_context(frame: pd.DataFrame, label: str, selected_code: str | None = None,
-                            max_rows: int | None = None) -> str:
-    """Serialize all available rows from a source sheet for grounded chat analysis.
-
-    When a program_code column exists, prioritize the selected program while retaining
-    the complete sheet in context if it is small enough. No silent row sampling occurs.
-    """
-    if frame is None or frame.empty:
-        return f"Source sheet: {label}\nNo rows available."
-    view = frame.copy()
-    scope_note = "Complete sheet"
-    if selected_code and "program_code" in view.columns:
-        match = view["program_code"].astype(str).str.strip().eq(str(selected_code).strip())
-        if match.any():
-            view = view.loc[match]
-            scope_note = f"Filtered to selected program_code={selected_code}"
-        else:
-            scope_note = (f"No rows matched selected program_code={selected_code}; "
-                          "showing complete sheet")
-    try:
-        table = view.to_csv(index=False)
-    except Exception:
-        table = view.astype(str).to_string(index=False)
-    return (
-        f"Source sheet: {label}\n"
-        f"Scope: {scope_note}\n"
-        f"Rows supplied: {len(view)} of {len(frame)} loaded rows\n"
-        f"Columns: {', '.join(map(str, frame.columns))}\n"
-        f"Complete row data (CSV format):\n{table}"
-    )
-
-
-def _load_source_sheet_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
-    """Load every CSV and every sheet in Excel workbooks under data/."""
-    blocks = []
-    if not data_dir.exists():
-        return "No data directory found; source sheets are unavailable."
-    supported = sorted(
-        list(data_dir.glob("*.csv")) + list(data_dir.glob("*.xlsx")) + list(data_dir.glob("*.xls"))
-    )
-    if not supported:
-        return "No CSV or Excel source sheets found in the app data/ directory."
-    for path in supported:
-        try:
-            if path.suffix.lower() == ".csv":
-                frame = pd.read_csv(path, low_memory=False)
-                blocks.append(_chat_dataframe_context(
-                    frame, f"CSV file {path.name}", selected_code=selected_code
-                ))
-            else:
-                workbook = pd.ExcelFile(path)
-                for sheet_name in workbook.sheet_names:
-                    frame = pd.read_excel(path, sheet_name=sheet_name)
-                    blocks.append(_chat_dataframe_context(
-                        frame, f"Excel workbook {path.name} | sheet {sheet_name}",
-                        selected_code=selected_code
-                    ))
-        except Exception as exc:
-            blocks.append(f"Source file: {path.name}\nCould not read source: {exc}")
-    return "\n\n--- NEXT SOURCE SHEET ---\n\n".join(blocks)
-
-
-def _load_excel_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
-    """Backward-compatible alias for the complete source-sheet loader."""
-    return _load_source_sheet_chat_context(data_dir, selected_code)
-
-
-def _get_chat_cached_report(selected_code: str | None) -> str:
-    """Fetch the current program's cached Overall Program Analysis report from GitHub."""
-    if not selected_code:
-        return "No program is selected; no program-specific cached report was requested."
-    try:
-        primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
-        advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
-        key = make_cache_key(
-            program_code=selected_code,
-            primary_data_path=primary_data_path,
-            advisor_data_path=advisor_data_path,
-            prompt_version="overall-program-prompt-approved-v3-where-it-went-wrong",
+        performance = get_check_tool_performance(
+            check_df,
+            program_code,
         )
-        cached = get_cached_report(key)
-        if cached and cached.get("report"):
-            return (
-                f"GitHub cached Overall Program Analysis for program {selected_code}:\n"
-                + str(cached["report"])[:24000]
+
+
+        if performance:
+
+            render_performance_report(
+                performance=performance,
+                program_code=program_code,
+                old_batch_code=old_batch_code,
             )
-    except Exception:
-        pass
-    # When this session has already generated or retrieved a report, use it even if
-    # the GitHub lookup is temporarily unavailable.
-    session_report = st.session_state.get("analysis_text")
-    report_meta = st.session_state.get("analysis_report") or {}
-    if session_report and (
-        not report_meta.get("program_code") or str(report_meta.get("program_code")) == str(selected_code)
-    ):
-        return f"Current session Overall Program Analysis for {selected_code}:\n{str(session_report)[:24000]}"
-    return (
-        f"No cached Overall Program Analysis was found for {selected_code}. "
-        "Answer from the available spreadsheet/data context and do not pretend a report was retrieved."
-    )
 
 
-def _build_chat_extra_context(selected_code: str | None, data_frame: pd.DataFrame) -> str:
-    parts = [
-        _get_chat_cached_report(selected_code),
-        _load_source_sheet_chat_context(APP_DIR / "data", selected_code=selected_code),
-    ]
-    # Explicitly disclose context size; do not silently pretend truncated data was complete.
-    combined = "\n\n--- SOURCE SEPARATOR ---\n\n".join(parts)
-    max_chars = 180000
-    if len(combined) > max_chars:
-        combined = combined[:max_chars]
-        combined += ("\n\n[CONTEXT LIMIT: Additional source-sheet content was omitted "
-                     "to fit the model request. The assistant must disclose this limitation "
-                     "and must not claim the omitted rows were analyzed.]" )
-    return combined
+    # =========================================================
+    # SOURCE-WISE HISTORICAL BATCH POPUP
+    # =========================================================
 
+    def show_other_batch_source_tables():
+        """Show a short evidence-based source diagnosis and table for each selected historical batch."""
+        @st.dialog("Source-wise analysis — other selected batches", width="large")
+        def _dialog():
+            batch_codes = st.session_state.get("source_popup_batches", [])[:3]
+            if not batch_codes:
+                st.info("No historical batches were selected.")
+                return
 
-# =========================================================
-# CHAT HISTORY
-# =========================================================
+            st.caption(
+                "Each batch includes a short source-level diagnosis followed by its source table. "
+                "The current New Batch source table remains in the main report."
+            )
 
-# Keep only the latest five messages (user + assistant messages combined).
-st.session_state.chat_history = st.session_state.chat_history[-5:]
+            def num_sum(series):
+                return pd.to_numeric(series, errors="coerce").sum(min_count=1)
 
-for message in st.session_state.chat_history:
+            def ratio(numerator, denominator):
+                if pd.isna(numerator) or pd.isna(denominator) or denominator == 0:
+                    return None
+                return numerator / denominator * 100
 
-    role = message.get(
-        "role",
-        "assistant",
-    )
+            def fmt_pct(value):
+                return f"{value:.2f}%" if value is not None and pd.notna(value) else "N/A"
 
-    content = message.get(
-        "content",
-        "",
-    )
+            def fmt_money(value):
+                return f"₹{value:,.2f}" if value is not None and pd.notna(value) else "N/A"
 
+            for batch_code in batch_codes:
+                batch_rows = raw_df[
+                    raw_df["program_code"].astype(str).str.strip().eq(str(batch_code).strip())
+                ].copy()
+                st.markdown(f"### {batch_code}")
 
-    with st.chat_message(role):
+                if batch_rows.empty:
+                    st.info(f"No source-level rows were found for {batch_code}.")
+                    continue
+                if "source_created" not in batch_rows.columns:
+                    st.warning("Source column `source_created` is not available in this dataset.")
+                    continue
 
-        st.markdown(
-            content
-        )
+                records = []
+                for source, group in batch_rows.groupby("source_created", dropna=False):
+                    leads = num_sum(group["leads"]) if "leads" in group else None
+                    warm = num_sum(group["warm_leads"]) if "warm_leads" in group else None
+                    apps = num_sum(group["applications"]) if "applications" in group else None
+                    enrollments = num_sum(group["enrollments"]) if "enrollments" in group else None
+                    spend = num_sum(group["spends"]) if "spends" in group else None
+                    records.append({
+                        "Source": str(source) if pd.notna(source) else "Unknown",
+                        "Leads": leads,
+                        "Warm leads": warm,
+                        "Applications": apps,
+                        "Enrollments": enrollments,
+                        "L2W": ratio(warm, leads),
+                        "L2A": ratio(apps, leads),
+                        "W2A": ratio(apps, warm),
+                        "L2E": ratio(enrollments, leads),
+                        "A2E": ratio(enrollments, apps),
+                        "Observed spend": spend,
+                        "CPL": spend / leads if pd.notna(spend) and pd.notna(leads) and leads else None,
+                        "CAC": spend / enrollments if pd.notna(spend) and pd.notna(enrollments) and enrollments else None,
+                    })
 
+                table = pd.DataFrame(records)
+                if table.empty:
+                    st.info(f"No source rows are available for {batch_code}.")
+                    continue
 
-# =========================================================
-# CHAT INPUT
-# =========================================================
+                # Calculate metrics deterministically in Python. Only the 2-3 line
+                # narrative below is generated by the LLM and cached per batch/data version.
+                total_leads = num_sum(table["Leads"])
+                total_warm = num_sum(table["Warm leads"])
+                total_apps = num_sum(table["Applications"])
+                total_enrollments = num_sum(table["Enrollments"])
+                total_spend = num_sum(table["Observed spend"])
+                overall_l2a = ratio(total_apps, total_leads)
+                overall_l2e = ratio(total_enrollments, total_leads)
+                overall_w2a = ratio(total_apps, total_warm)
+                spend_coverage = int(table["Observed spend"].notna().sum())
+                source_count = len(table)
+                # Contribution and impact calculations are deterministic Python outputs.
+                for metric_col, share_col in [("Leads", "Lead share"), ("Applications", "Application share"), ("Enrollments", "Enrollment share")]:
+                    denom = num_sum(table[metric_col])
+                    table[share_col] = (table[metric_col] / denom * 100) if pd.notna(denom) and denom != 0 else None
+                min_leads_for_rank = max(10.0, (float(total_leads) if pd.notna(total_leads) else 0.0) * 0.03)
+                table["Ranking eligible"] = table["Leads"].ge(min_leads_for_rank)
+                benchmark_l2e = (total_enrollments / total_leads) if pd.notna(total_enrollments) and pd.notna(total_leads) and total_leads else None
+                table["Expected enrolments at program L2E"] = table["Leads"] * benchmark_l2e if benchmark_l2e is not None else None
+                table["Enrolment gap vs benchmark"] = (table["Expected enrolments at program L2E"] - table["Enrollments"]).clip(lower=0) if benchmark_l2e is not None else None
+                total_positive_gap = table["Enrolment gap vs benchmark"].sum(min_count=1)
+                table["Share of estimated gap"] = table["Enrolment gap vs benchmark"] / total_positive_gap * 100 if pd.notna(total_positive_gap) and total_positive_gap > 0 else None
+                table["Impact priority"] = table["Enrolment gap vs benchmark"].apply(lambda x: "High" if pd.notna(x) and x >= 2 else ("Medium" if pd.notna(x) and x >= 0.5 else ("Low" if pd.notna(x) else "N/A")))
+                table.loc[~table["Ranking eligible"], "Impact priority"] = "Not ranked (low volume)"
+                table["Spend coverage"] = table["Observed spend"].apply(lambda x: "Available" if pd.notna(x) else "Missing")
+                program_rates = {"L2W": ratio(total_warm, total_leads), "L2A": overall_l2a, "W2A": overall_w2a,
+                                 "A2E": ratio(total_enrollments, total_apps)}
+                def weakest_stage(row):
+                    gaps = []
+                    for stage, col, denominator in [("L2W", "L2W", "Leads"), ("W2A", "W2A", "Warm leads"), ("A2E", "A2E", "Applications")]:
+                        own = row.get(col)
+                        benchmark = program_rates.get(stage)
+                        if pd.notna(own) and benchmark is not None:
+                            gaps.append((stage, float(own) - float(benchmark)))
+                    return min(gaps, key=lambda item: item[1])[0] if gaps else "N/A"
+                table["Weakest stage vs program"] = table.apply(weakest_stage, axis=1)
 
-question = st.chat_input(
-    " ",
-    key="agent_chat_input",
-)
+                lead_source = table.loc[table["Leads"].fillna(0).idxmax()] if source_count else None
+                enrollment_source = table.loc[table["Enrollments"].fillna(0).idxmax()] if source_count else None
+                l2a_candidates = table[table["Leads"].fillna(0) >= max(10, total_leads * 0.03)]
+                weakest_l2a = l2a_candidates.loc[l2a_candidates["L2A"].idxmin()] if not l2a_candidates.empty and l2a_candidates["L2A"].notna().any() else None
+                best_l2a = l2a_candidates.loc[l2a_candidates["L2A"].idxmax()] if not l2a_candidates.empty and l2a_candidates["L2A"].notna().any() else None
 
+                # Prepare compact evidence from Python-computed metrics. The LLM is
+                # explicitly limited to a 2-3 sentence interpretation; it must not
+                # recalculate or invent values.
+                source_evidence = []
+                for _, row in table.iterrows():
+                    source_evidence.append({
+                        "source": row["Source"],
+                        "leads": None if pd.isna(row["Leads"]) else int(row["Leads"]),
+                        "warm_leads": None if pd.isna(row["Warm leads"]) else int(row["Warm leads"]),
+                        "applications": None if pd.isna(row["Applications"]) else int(row["Applications"]),
+                        "enrollments": None if pd.isna(row["Enrollments"]) else int(row["Enrollments"]),
+                        "L2W_pct": None if pd.isna(row["L2W"]) else round(float(row["L2W"]), 2),
+                        "L2A_pct": None if pd.isna(row["L2A"]) else round(float(row["L2A"]), 2),
+                        "W2A_pct": None if pd.isna(row["W2A"]) else round(float(row["W2A"]), 2),
+                        "L2E_pct": None if pd.isna(row["L2E"]) else round(float(row["L2E"]), 2),
+                        "A2E_pct": None if pd.isna(row["A2E"]) else round(float(row["A2E"]), 2),
+                        "observed_spend": None if pd.isna(row["Observed spend"]) else round(float(row["Observed spend"]), 2),
+                        "CPL": None if pd.isna(row["CPL"]) else round(float(row["CPL"]), 2),
+                        "CAC": None if pd.isna(row["CAC"]) else round(float(row["CAC"]), 2),
+                        "lead_share_pct": None if pd.isna(row["Lead share"]) else round(float(row["Lead share"]), 2),
+                        "application_share_pct": None if pd.isna(row["Application share"]) else round(float(row["Application share"]), 2),
+                        "enrollment_share_pct": None if pd.isna(row["Enrollment share"]) else round(float(row["Enrollment share"]), 2),
+                        "weakest_stage_vs_program": row["Weakest stage vs program"],
+                        "estimated_enrollment_gap_vs_program_L2E": None if pd.isna(row["Enrolment gap vs benchmark"]) else round(float(row["Enrolment gap vs benchmark"]), 2),
+                        "impact_priority": row["Impact priority"],
+                        "spend_coverage": row["Spend coverage"],
+                    })
 
-# =========================================================
-# CHAT PROCESSING
-# =========================================================
-
-if question:
-
-    st.session_state.chat_history.append(
-        {
-            "role": "user",
-            "content": question,
-        }
-    )
-
-
-    with st.chat_message("user"):
-
-        st.markdown(
-            question
-        )
-
-
-    with st.chat_message("assistant"):
-
-        with st.spinner(
-            "Analyzing..."
-        ):
-
-            try:
-
-                answer = ask_agent(
-                    question=question,
-                    df=df,
-                    program_code=program_code,
-                    check_df=check_df,
-                    chat_history=(
-                        st.session_state.chat_history[:-1][-5:]
-                    ),
-                    extra_context=_build_chat_extra_context(
-                        selected_code=program_code,
-                        data_frame=raw_df,
-                    ),
+                narrative_key = make_cache_key(
+                    program_code=str(batch_code),
+                    primary_data_path=APP_DIR / "data" / "Program Batch Data.csv",
+                    advisor_data_path=APP_DIR / "data" / "Advisor Mix.csv",
+                    prompt_version="source-wise-batch-narrative-v2-impact-prioritization",
+                    selected_old_batches=[],
                 )
+                narrative = None
+                try:
+                    with get_process_lock(narrative_key):
+                        cached_narrative = get_cached_report(narrative_key)
+                        if cached_narrative and cached_narrative.get("report"):
+                            narrative = str(cached_narrative["report"]).strip()
+                        else:
+                            from openai import OpenAI
+                            import json as _json
 
-            except TypeError:
+                            client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+                            model = st.secrets.get("OPENAI_MODEL", "gpt-5.6")
+                            payload = {
+                                "batch": str(batch_code),
+                                "totals": {
+                                    "leads": None if pd.isna(total_leads) else int(total_leads),
+                                    "warm_leads": None if pd.isna(total_warm) else int(total_warm),
+                                    "applications": None if pd.isna(total_apps) else int(total_apps),
+                                    "enrollments": None if pd.isna(total_enrollments) else int(total_enrollments),
+                                    "L2W_pct": None if pd.isna(ratio(total_warm, total_leads)) else round(ratio(total_warm, total_leads), 2),
+                                    "L2A_pct": None if pd.isna(overall_l2a) else round(overall_l2a, 2),
+                                    "W2A_pct": None if pd.isna(overall_w2a) else round(overall_w2a, 2),
+                                    "L2E_pct": None if pd.isna(overall_l2e) else round(overall_l2e, 2),
+                                    "observed_spend_sum_of_available_sources": None if pd.isna(total_spend) else round(float(total_spend), 2),
+                                    "sources_with_spend": spend_coverage,
+                                    "source_count": source_count,
+                                    "spend_coverage_pct": round(spend_coverage / source_count * 100, 2) if source_count else None,
+                                    "impact_method": "max(0, source leads × program blended L2E − source enrollments); counterfactual prioritization only",
+                                },
+                                "source_metrics": source_evidence,
+                            }
+                            response = client.responses.create(
+                                model=model,
+                                instructions=(
+                                    "You are a senior marketing performance analyst. Write exactly 2-3 concise "
+                                    "sentences for the source-wise root-cause analysis of this batch. Use only the "
+                                    "provided computed evidence. Identify meaningful source-level strengths and "
+                                    "weaknesses, contribution shares, weakest funnel stages, impact priorities, and spend-data limitations "
+                                    "where relevant. Prioritize sources by estimated enrollment gap rather than lowest rate alone. "
+                                    "Explain that benchmark gaps are counterfactual, not causal or guaranteed recoverable. Cite specific source names and numbers from the payload. "
+                                    "Do not recalculate metrics, invent targets, claim causes not demonstrated by "
+                                    "the data, or imply missing spend is zero. Distinguish observations from hypotheses. "
+                                    "Return only the 2-3 sentence paragraph, no heading or bullets."
+                                ),
+                                input=_json.dumps(payload, ensure_ascii=False),
+                            )
+                            narrative = (getattr(response, "output_text", "") or "").strip()
+                            if narrative:
+                                put_cached_report(
+                                    narrative_key,
+                                    narrative,
+                                    metadata={
+                                        "analysis_type": "Source-wise batch narrative",
+                                        "program_code": str(batch_code),
+                                        "prompt_version": "source-wise-batch-narrative-v2-impact-prioritization",
+                                    },
+                                )
+                except Exception:
+                    # The table remains available if the LLM/cache service is unavailable.
+                    narrative = None
+
+                if narrative:
+                    st.markdown(narrative)
+                else:
+                    st.info(
+                        "A batch-specific LLM narrative is temporarily unavailable. "
+                        "The source metrics below are still calculated directly from the data."
+                    )
+
+                table = table.sort_values("Enrolment gap vs benchmark", ascending=False, na_position="last")
+                for column in ["L2W", "L2A", "W2A", "L2E", "A2E"]:
+                    table[column] = table[column].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+                for column in ["Observed spend", "CPL", "CAC"]:
+                    table[column] = table[column].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
+                for column in ["Lead share", "Application share", "Enrollment share", "Share of estimated gap"]:
+                    table[column] = table[column].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+                for column in ["Expected enrolments at program L2E", "Enrolment gap vs benchmark"]:
+                    table[column] = table[column].map(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+                for column in ["Leads", "Warm leads", "Applications", "Enrollments"]:
+                    table[column] = table[column].map(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A")
+                st.dataframe(table, width="stretch", hide_index=True)
+
+        _dialog()
+
+
+    # =========================================================
+    # AI BUSINESS DIAGNOSIS
+    # =========================================================
+
+    if st.session_state.analysis_text:
+
+        render_ai_diagnosis(
+            st.session_state.analysis_text
+        )
+
+
+    # =========================================================
+    # CHAT SECTION
+    # =========================================================
+
+    render_html(
+        """
+        <div class="chat-shell">
+
+            <div class="chat-heading">
+                Chat with Agent
+            </div>
+
+            <div class="chat-description">
+                Ask follow-up questions about programs, batches,
+                sources, CAC, CPL, funnel performance,
+                plan variance, or business drivers.
+            </div>
+
+        </div>
+        """
+    )
+
+
+    # =========================================================
+    # OPTIMAL LAUNCH METRICS (SEPARATE MODULE; EXISTING UI OTHERWISE UNCHANGED)
+    # =========================================================
+
+    from optimal_launch_metrics import render_optimal_launch_metrics
+
+    render_optimal_launch_metrics(
+        st=st,
+        raw_df=raw_df,
+        selected_code=program_code,
+    )
+
+
+
+
+    # =========================================================
+    # CHAT DATA SOURCES: GITHUB CACHED REPORT + EXCEL WORKBOOKS
+    # =========================================================
+
+    def _chat_dataframe_context(frame: pd.DataFrame, label: str, selected_code: str | None = None,
+                                max_rows: int | None = None) -> str:
+        """Serialize all available rows from a source sheet for grounded chat analysis.
+
+        When a program_code column exists, prioritize the selected program while retaining
+        the complete sheet in context if it is small enough. No silent row sampling occurs.
+        """
+        if frame is None or frame.empty:
+            return f"Source sheet: {label}\nNo rows available."
+        view = frame.copy()
+        scope_note = "Complete sheet"
+        if selected_code and "program_code" in view.columns:
+            match = view["program_code"].astype(str).str.strip().eq(str(selected_code).strip())
+            if match.any():
+                view = view.loc[match]
+                scope_note = f"Filtered to selected program_code={selected_code}"
+            else:
+                scope_note = (f"No rows matched selected program_code={selected_code}; "
+                              "showing complete sheet")
+        try:
+            table = view.to_csv(index=False)
+        except Exception:
+            table = view.astype(str).to_string(index=False)
+        return (
+            f"Source sheet: {label}\n"
+            f"Scope: {scope_note}\n"
+            f"Rows supplied: {len(view)} of {len(frame)} loaded rows\n"
+            f"Columns: {', '.join(map(str, frame.columns))}\n"
+            f"Complete row data (CSV format):\n{table}"
+        )
+
+
+    def _load_source_sheet_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
+        """Load every CSV and every sheet in Excel workbooks under data/."""
+        blocks = []
+        if not data_dir.exists():
+            return "No data directory found; source sheets are unavailable."
+        supported = sorted(
+            list(data_dir.glob("*.csv")) + list(data_dir.glob("*.xlsx")) + list(data_dir.glob("*.xls"))
+        )
+        if not supported:
+            return "No CSV or Excel source sheets found in the app data/ directory."
+        for path in supported:
+            try:
+                if path.suffix.lower() == ".csv":
+                    frame = pd.read_csv(path, low_memory=False)
+                    blocks.append(_chat_dataframe_context(
+                        frame, f"CSV file {path.name}", selected_code=selected_code
+                    ))
+                else:
+                    workbook = pd.ExcelFile(path)
+                    for sheet_name in workbook.sheet_names:
+                        frame = pd.read_excel(path, sheet_name=sheet_name)
+                        blocks.append(_chat_dataframe_context(
+                            frame, f"Excel workbook {path.name} | sheet {sheet_name}",
+                            selected_code=selected_code
+                        ))
+            except Exception as exc:
+                blocks.append(f"Source file: {path.name}\nCould not read source: {exc}")
+        return "\n\n--- NEXT SOURCE SHEET ---\n\n".join(blocks)
+
+
+    def _load_excel_chat_context(data_dir: Path, selected_code: str | None = None) -> str:
+        """Backward-compatible alias for the complete source-sheet loader."""
+        return _load_source_sheet_chat_context(data_dir, selected_code)
+
+
+    def _get_chat_cached_report(selected_code: str | None) -> str:
+        """Fetch the current program's cached Overall Program Analysis report from GitHub."""
+        if not selected_code:
+            return "No program is selected; no program-specific cached report was requested."
+        try:
+            primary_data_path = APP_DIR / "data" / "Program Batch Data.csv"
+            advisor_data_path = APP_DIR / "data" / "Advisor Mix.csv"
+            key = make_cache_key(
+                program_code=selected_code,
+                primary_data_path=primary_data_path,
+                advisor_data_path=advisor_data_path,
+                prompt_version="overall-program-prompt-approved-v3-where-it-went-wrong",
+            )
+            cached = get_cached_report(key)
+            if cached and cached.get("report"):
+                return (
+                    f"GitHub cached Overall Program Analysis for program {selected_code}:\n"
+                    + str(cached["report"])[:24000]
+                )
+        except Exception:
+            pass
+        # When this session has already generated or retrieved a report, use it even if
+        # the GitHub lookup is temporarily unavailable.
+        session_report = st.session_state.get("analysis_text")
+        report_meta = st.session_state.get("analysis_report") or {}
+        if session_report and (
+            not report_meta.get("program_code") or str(report_meta.get("program_code")) == str(selected_code)
+        ):
+            return f"Current session Overall Program Analysis for {selected_code}:\n{str(session_report)[:24000]}"
+        return (
+            f"No cached Overall Program Analysis was found for {selected_code}. "
+            "Answer from the available spreadsheet/data context and do not pretend a report was retrieved."
+        )
+
+
+    def _build_chat_extra_context(selected_code: str | None, data_frame: pd.DataFrame) -> str:
+        parts = [
+            _get_chat_cached_report(selected_code),
+            _load_source_sheet_chat_context(APP_DIR / "data", selected_code=selected_code),
+        ]
+        # Explicitly disclose context size; do not silently pretend truncated data was complete.
+        combined = "\n\n--- SOURCE SEPARATOR ---\n\n".join(parts)
+        max_chars = 180000
+        if len(combined) > max_chars:
+            combined = combined[:max_chars]
+            combined += ("\n\n[CONTEXT LIMIT: Additional source-sheet content was omitted "
+                         "to fit the model request. The assistant must disclose this limitation "
+                         "and must not claim the omitted rows were analyzed.]" )
+        return combined
+
+
+    # =========================================================
+    # CHAT HISTORY
+    # =========================================================
+
+    # Keep only the latest five messages (user + assistant messages combined).
+    st.session_state.chat_history = st.session_state.chat_history[-5:]
+
+    for message in st.session_state.chat_history:
+
+        role = message.get(
+            "role",
+            "assistant",
+        )
+
+        content = message.get(
+            "content",
+            "",
+        )
+
+
+        with st.chat_message(role):
+
+            st.markdown(
+                content
+            )
+
+
+    # =========================================================
+    # CHAT INPUT
+    # =========================================================
+
+    question = st.chat_input(
+        " ",
+        key="agent_chat_input",
+    )
+
+
+    # =========================================================
+    # CHAT PROCESSING
+    # =========================================================
+
+    if question:
+
+        st.session_state.chat_history.append(
+            {
+                "role": "user",
+                "content": question,
+            }
+        )
+
+
+        with st.chat_message("user"):
+
+            st.markdown(
+                question
+            )
+
+
+        with st.chat_message("assistant"):
+
+            with st.spinner(
+                "Analyzing..."
+            ):
 
                 try:
 
@@ -6176,7 +6172,31 @@ if question:
                         question=question,
                         df=df,
                         program_code=program_code,
+                        check_df=check_df,
+                        chat_history=(
+                            st.session_state.chat_history[:-1][-5:]
+                        ),
+                        extra_context=_build_chat_extra_context(
+                            selected_code=program_code,
+                            data_frame=raw_df,
+                        ),
                     )
+
+                except TypeError:
+
+                    try:
+
+                        answer = ask_agent(
+                            question=question,
+                            df=df,
+                            program_code=program_code,
+                        )
+
+                    except Exception as exc:
+
+                        answer = (
+                            f"Analysis failed: `{exc}`"
+                        )
 
                 except Exception as exc:
 
@@ -6184,23 +6204,38 @@ if question:
                         f"Analysis failed: `{exc}`"
                     )
 
-            except Exception as exc:
 
-                answer = (
-                    f"Analysis failed: `{exc}`"
-                )
+            st.markdown(
+                answer
+            )
 
 
-        st.markdown(
-            answer
+        st.session_state.chat_history.append(
+            {
+                "role": "assistant",
+                "content": answer,
+            }
         )
+        # Persist at most five messages in Streamlit session memory.
+        st.session_state.chat_history = st.session_state.chat_history[-5:]
 
+else:
+    from category_analysis import render_category_analysis
 
-    st.session_state.chat_history.append(
-        {
-            "role": "assistant",
-            "content": answer,
-        }
-    )
-    # Persist at most five messages in Streamlit session memory.
-    st.session_state.chat_history = st.session_state.chat_history[-5:]
+    category_data_path = APP_DIR / "data" / "Category Analysis Data.csv"
+    if not category_data_path.exists():
+        st.error(
+            "Category Analysis data file not found. Add "
+            "`data/Category Analysis Data.csv` to the repository."
+        )
+        st.stop()
+
+    @st.cache_data
+    def load_category_data(path: str):
+        return pd.read_csv(path, low_memory=False)
+
+    try:
+        category_raw_df = load_category_data(str(category_data_path))
+        render_category_analysis(st, category_raw_df)
+    except Exception as exc:
+        st.error(f"Unable to load or render Category Analysis: {exc}")
