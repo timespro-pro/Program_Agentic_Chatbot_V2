@@ -594,8 +594,84 @@ def _build_management_tables(programs: pd.DataFrame) -> dict:
     return {"programs": p, "categories": categories, "batches": batches, "diagnostics": diagnostics}
 
 
+
+def _category_panel_header(st, title: str, status: str = "MIXED", basis: str = "") -> None:
+    """Render a Program-Analysis-style section heading and verdict inside a bordered panel."""
+    color = {"GOOD": "#16c784", "BAD": "#ff4b55", "MIXED": "#f0a43a"}.get(status, "#f0a43a")
+    st.markdown(
+        f"""
+        <div class="cat-analysis-heading">{title.upper()}</div>
+        <div class="cat-analysis-status"><b>Performance Status:</b>
+        <span style="color:{color};font-size:1.05rem">●</span>
+        <b>{status}</b></div>
+        {f'<div class="cat-analysis-basis"><i>Assessment basis:</i> {basis}</div>' if basis else ''}
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _category_panel_style(st) -> None:
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid rgba(150, 177, 235, .42) !important;
+            border-radius: 17px !important;
+            background: rgba(8, 31, 91, .30) !important;
+            padding: 15px 18px !important;
+            margin: 10px 0 18px 0 !important;
+            box-shadow: 0 8px 24px rgba(0, 10, 40, .10) !important;
+        }
+        .cat-analysis-heading { color: inherit; font-size: .91rem; font-weight: 900;
+            letter-spacing: .045em; text-transform: uppercase; margin-bottom: 13px; }
+        .cat-analysis-status { font-size: .90rem; margin-bottom: 9px; }
+        .cat-analysis-basis { font-size: .84rem; opacity: .90; margin: 0 0 12px 0; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _category_panel_header(st, title: str, status: str = "MIXED", basis: str = "") -> None:
+    """Render a Program-Analysis-style section heading and verdict inside a bordered panel."""
+    color = {"GOOD": "#16c784", "BAD": "#ff4b55", "MIXED": "#f0a43a"}.get(status, "#f0a43a")
+    st.markdown(
+        f"""
+        <div class="cat-analysis-heading">{title.upper()}</div>
+        <div class="cat-analysis-status"><b>Performance Status:</b>
+        <span style="color:{color};font-size:1.05rem">●</span>
+        <b>{status}</b></div>
+        {f'<div class="cat-analysis-basis"><i>Assessment basis:</i> {basis}</div>' if basis else ''}
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _category_panel_style(st) -> None:
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid rgba(150, 177, 235, .42) !important;
+            border-radius: 17px !important;
+            background: rgba(8, 31, 91, .30) !important;
+            padding: 15px 18px !important;
+            margin: 10px 0 18px 0 !important;
+            box-shadow: 0 8px 24px rgba(0, 10, 40, .10) !important;
+        }
+        .cat-analysis-heading { color: inherit; font-size: .91rem; font-weight: 900;
+            letter-spacing: .045em; text-transform: uppercase; margin-bottom: 13px; }
+        .cat-analysis-status { font-size: .90rem; margin-bottom: 9px; }
+        .cat-analysis-basis { font-size: .84rem; opacity: .90; margin: 0 0 12px 0; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
     """Interactive category + program investigation driven by the user's filters."""
+    _category_panel_style(st)
+    _category_panel_style(st)
     st.markdown("## Category & Program Performance Analysis")
     st.caption("Select the categories and program batches you want to investigate. The narrative, comparisons and recommendations update to match your selection.")
 
@@ -665,8 +741,9 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
                 candidates.append((peer - own, metric, label, own, peer))
         return max(candidates, default=(np.nan, None, "", np.nan, np.nan), key=lambda x: x[0])
 
+    with st.container(border=True):
+        _category_panel_header(st, '1. Selected category comparison', "MIXED", 'Based on the selected categories, their weighted funnel conversion and batch-level distribution.')
     # 1. Overall comparison only across selected categories.
-    st.markdown("## 1. Selected category comparison")
     if len(cat_table) > 1:
         ranked = cat_table.sort_values("L2E", ascending=False, na_position="last")
         best_conv = ranked.iloc[0]
@@ -690,8 +767,9 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
             compact[c] = compact[c].map(pct)
     st.dataframe(compact, use_container_width=True, hide_index=True)
 
+    with st.container(border=True):
+        _category_panel_header(st, '2. Category-by-category findings', "MIXED", 'Each category is assessed against its own selected program-batch distribution.')
     # 2. A concise narrative for every selected category.
-    st.markdown("## 2. Category-by-category findings")
     for _, cat in cat_table.sort_values("enrollments", ascending=False).iterrows():
         cat_batches = batch_table[batch_table.tech_management == cat.tech_management].copy()
         eligible = cat_batches[cat_batches.leads >= 30]
@@ -715,8 +793,9 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         if len(eligible) < 4:
             st.caption("Interpret batch ranking cautiously: fewer than four selected batches have at least 30 leads.")
 
+    with st.container(border=True):
+        _category_panel_header(st, '3. Program / batch comparison', "MIXED", 'Based on the selected program batches and their lead-to-enrollment conversion.')
     # 3. Program-level analysis and peer comparison for exactly the selected programs.
-    st.markdown("## 3. Program / batch comparison")
     if len(batch_table) == 1:
         b = batch_table.iloc[0]
         st.write(f"**{b.program_code}** ({b.get('program_name', 'Program')}) generated {num(b.leads)} leads, {num(b.warm_leads)} warm leads, {num(b.applications)} applications and {num(b.enrollments)} enrollments. Conversion: L2W {pct(b.L2W)}, L2A {pct(b.L2A)}, A2E {pct(b.A2E)}, and L2E {pct(b.L2E)}.")
@@ -736,8 +815,9 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
     st.caption("Selected program evidence (one row per program_code).")
     st.dataframe(evidence, use_container_width=True, hide_index=True)
 
+    with st.container(border=True):
+        _category_panel_header(st, '4. What is driving the differences? What to improve', "MIXED", 'Based on each selected program compared with other selected batches in the same category.')
     # 4. Explain each selected program against peers in its own category.
-    st.markdown("## 4. What is driving the differences? What to improve")
     for _, b in batch_table.sort_values("L2E", ascending=True).iterrows():
         peers = batch_table[(batch_table.tech_management == b.tech_management) & (batch_table.program_code != b.program_code) & (batch_table.leads >= 30)]
         st.markdown(f"**{b.program_code} — {b.get('program_name', 'Program')}**")
@@ -760,9 +840,10 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
             paragraph += " No clear underperforming funnel stage is visible against these selected peers; investigate program mix, offer, pricing and sales execution before prescribing a change."
         st.write(paragraph)
 
+    with st.container(border=True):
+        _category_panel_header(st, '5. Commercial outcome', "MIXED", 'Based on reported GSV and enrollment values where data is available.')
     # Commercial measures only when the underlying data supports them.
     if "gsv_cr" in batch_table and batch_table.gsv_cr.notna().any():
-        st.markdown("## 5. Commercial outcome")
         gsv_total = batch_table.gsv_cr.sum(min_count=1)
         st.write(f"The selected batches report **{num(gsv_total, 2)} Cr GSV** in total. Compare GSV alongside enrollments: a category or program can lead on enrollment volume without leading on GSV per enrollment.")
         if "GSV_per_enrollment" in batch_table:
