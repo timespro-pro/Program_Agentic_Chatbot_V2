@@ -796,8 +796,192 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
             detail[x] = detail[x].map(p)
     st.dataframe(detail, use_container_width=True, hide_index=True)
 
-    # 5. What to improve
-    st.markdown("### 5. Improvement opportunities")
+    # 5. Good vs. weak program comparison — same-category peer benchmark.
+    st.markdown("### 5. What good-performing programs do differently")
+    st.caption(
+        "Within each selected category, top- and bottom-quartile batches are compared using "
+        "the same lead-volume eligibility threshold. Green arrows indicate a stronger rate; "
+        "red arrows indicate a weaker rate."
+    )
+
+    def direction(value, benchmark, higher_is_better=True):
+        if pd.isna(value) or pd.isna(benchmark):
+            return "— N/A"
+        positive = value >= benchmark if higher_is_better else value <= benchmark
+        arrow = "🟢 ↑" if positive else "🔴 ↓"
+        return f"{arrow} {p(value)}"
+
+    def rate_gap(value, benchmark):
+        if pd.isna(value) or pd.isna(benchmark):
+            return "N/A"
+        diff = (value - benchmark) * 100
+        arrow = "🟢 ↑" if diff >= 0 else "🔴 ↓"
+        return f"{arrow} {diff:+.2f} pp"
+
+    comparisons = []
+    action_rows = []
+    # Use the full filtered category pool for fair peer benchmarks, even when the
+    # user has narrowed the displayed program list to only a few batches.
+    benchmark_batches = _build_management_tables(filtered)["batches"]
+    for category_name, selected_group in batch_table.groupby("category", dropna=False):
+        peer_group = benchmark_batches[
+            benchmark_batches.category.astype(str) == str(category_name)
+        ]
+        eligible = peer_group[
+            (pd.to_numeric(peer_group["leads"], errors="coerce") >= 30)
+            & peer_group["L2E"].notna()
+        ].copy()
+        selected_eligible = selected_group[
+            (pd.to_numeric(selected_group["leads"], errors="coerce") >= 30)
+            & selected_group["L2E"].notna()
+        ].copy()
+        if len(eligible) < 4:
+            continue
+        q25, q75 = eligible["L2E"].quantile([0.25, 0.75])
+        weak = selected_eligible[selected_eligible["L2E"] <= q25].copy()
+        good = eligible[eligible["L2E"] >= q75].copy()
+        if weak.empty:
+            continue
+        if weak.empty or good.empty:
+            continue
+
+        rate_cols = ["L2W", "L2A", "W2A", "A2E", "L2E"]
+        good_median = {m: good[m].median() for m in rate_cols if m in good}
+        weak_median = {m: weak[m].median() for m in rate_cols if m in weak}
+        comparisons.append({
+            "Category": category_name,
+            "Good batches": len(good),
+            "Weak batches": len(weak),
+            "Good median L2E": good_median.get("L2E", np.nan),
+            "Weak median L2E": weak_median.get("L2E", np.nan),
+            "L2E gap (pp)": (
+                (good_median.get("L2E", np.nan) - weak_median.get("L2E", np.nan)) * 100
+                if pd.notna(good_median.get("L2E", np.nan)) and pd.notna(weak_median.get("L2E", np.nan))
+                else np.nan
+            ),
+        })
+
+        for _, weak_batch in weak.sort_values("L2E").iterrows():
+            # Identify the largest actionable stage gap against the good cohort median.
+            candidates = []
+            for metric, label in [
+                ("L2W", "Lead → Warm lead"),
+                ("L2A", "Lead → Application"),
+                ("A2E", "Application → Enrollment"),
+            ]:
+                own_rate = weak_batch.get(metric, np.nan)
+                good_rate = good_median.get(metric, np.nan)
+                if pd.notna(own_rate) and pd.notna(good_rate):
+                    candidates.append((good_rate - own_rate, metric, label, own_rate, good_rate))
+            candidates = [x for x in candidates if x[0] > 0]
+            if not candidates:
+                continue
+            gap, metric, label, own_rate, good_rate = max(candidates, key=lambda x: x[0])
+
+            # Illustrative volume opportunity, holding downstream conversion constant.
+            if metric == "L2W":
+                downstream = weak_batch.get("W2A", np.nan) * weak_batch.get("A2E", np.nan)
+                opportunity = weak_batch.leads * gap * downstream if pd.notna(downstream) else np.nan
+            elif metric == "L2A":
+                downstream = weak_batch.get("A2E", np.nan)
+                opportunity = weak_batch.leads * gap * downstream if pd.notna(downstream) else np.nan
+            else:
+                opportunity = weak_batch.applications * gap if pd.notna(weak_batch.get("applications", np.nan)) else np.nan
+
+            action_map = {
+                "L2W": "Audit lead validity and source mix; tighten audience targeting, improve contactability, and shorten speed-to-lead.",
+                "L2A": "Compare lead qualification and counselling-to-application practices; remove application friction and review source-level lead quality.",
+                "A2E": "Review counselling follow-up, eligibility objections, fee/payment drop-offs, and application completion discipline.",
+            }
+            action_rows.append({
+                "category": category_name,
+                "program_code": str(weak_batch.program_code),
+                "program_name": weak_batch.get("program_name", "Program"),
+                "leads": weak_batch.leads,
+                "enrollments": weak_batch.enrollments,
+                "L2E": weak_batch.L2E,
+                "metric": metric,
+                "stage_label": label,
+                "own_rate": own_rate,
+                "good_rate": good_rate,
+                "gap_pp": gap * 100,
+                "opportunity": opportunity,
+                "action": action_map[metric],
+                "good": good,
+            })
+
+    if comparisons:
+        comp_df = pd.DataFrame(comparisons)
+        comp_display = comp_df.copy()
+        for col in ["Good median L2E", "Weak median L2E"]:
+            comp_display[col] = comp_display[col].map(p)
+        comp_display["L2E gap (pp)"] = comp_display["L2E gap (pp)"].map(
+            lambda x: "N/A" if pd.isna(x) else f"🟢 ↑ {x:.2f} pp"
+        )
+        st.dataframe(comp_display, use_container_width=True, hide_index=True)
+
+        if action_rows:
+            action_df = pd.DataFrame(action_rows).sort_values(
+                "opportunity", ascending=False, na_position="last"
+            )
+            for _, item in action_df.head(8).iterrows():
+                st.markdown(
+                    f"**{item['category']} — {item['program_code']}** "
+                    f"({item['program_name']})"
+                )
+                st.write(
+                    f"🔴 ↓ **{item['stage_label']} conversion: {p(item['own_rate'])}** "
+                    f"versus 🟢 ↑ **{p(item['good_rate'])}** median among top-performing "
+                    f"batches in the same category — a gap of **{item['gap_pp']:.2f} percentage points**."
+                )
+                st.write(
+                    f"**Where it went wrong:** this is the largest observed actionable funnel-stage "
+                    f"gap for this batch versus the category's good-performing peer group. "
+                    f"It generated {n(item['leads'])} leads and {n(item['enrollments'])} enrollments "
+                    f"(L2E: {p(item['L2E'])})."
+                )
+                st.write(
+                    f"**What to do:** {item['action']} "
+                    f"**Illustrative opportunity:** approximately {n(item['opportunity'], 1)} "
+                    f"additional enrollments if the identified stage rate reached the good-peer "
+                    f"median and downstream conversion stayed unchanged."
+                )
+
+            # One compact proof table for the selected weak batches.
+            proof = action_df.head(8)[[
+                "category", "program_code", "leads", "enrollments",
+                "L2E", "stage_label", "own_rate", "good_rate", "gap_pp", "opportunity"
+            ]].copy()
+            proof.columns = [
+                "Category", "Weak program code", "Leads", "Enrollments",
+                "Lead-to-enrollment", "Weakest stage", "Weak batch rate",
+                "Good-peer median", "Gap (pp)", "Illustrative extra enrollments"
+            ]
+            for col in ["Lead-to-enrollment", "Weak batch rate", "Good-peer median"]:
+                proof[col] = proof[col].map(p)
+            proof["Gap (pp)"] = proof["Gap (pp)"].map(lambda x: f"🔴 ↓ {x:.2f}" if pd.notna(x) else "N/A")
+            st.caption("Evidence for the program-level recommendations above.")
+            st.dataframe(proof, use_container_width=True, hide_index=True)
+        else:
+            st.write(
+                "No selected bottom-quartile batch showed a positive gap in the measured "
+                "actionable funnel stages versus its category's top-quartile peers."
+            )
+    else:
+        st.info(
+            "A good-versus-weak comparison needs at least four program batches with 30 or more "
+            "leads and a valid lead-to-enrollment rate in a category. The current selection "
+            "does not meet that threshold."
+        )
+
+    st.caption(
+        "Benchmark interpretation: top/bottom quartiles are descriptive peer groups, not proof "
+        "of causation. Estimated extra enrollments are scenarios, not forecasts; they assume "
+        "the selected stage improves to the good-peer median while downstream rates remain constant."
+    )
+
+    # 6. What to improve
+    st.markdown("### 6. Additional improvement opportunities")
     diagnostics = built.get("diagnostics", pd.DataFrame())
     shown = 0
     if not diagnostics.empty:
@@ -820,8 +1004,8 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
             "Use the funnel comparison above to decide which stage warrants investigation."
         )
 
-    # 6. Commercial outcomes and data caveats
-    st.markdown("### 6. Commercial outcomes")
+    # 7. Commercial outcomes and data caveats
+    st.markdown("### 7. Commercial outcomes")
     if "gsv_cr" in batch_table and batch_table.gsv_cr.notna().any():
         gsv = batch_table.gsv_cr.sum(min_count=1)
         st.write(
