@@ -598,237 +598,257 @@ def _build_management_tables(programs: pd.DataFrame) -> dict:
 
 
 def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
-    """Interactive category + program investigation driven by the user's filters."""
-    st.markdown("## Category & Program Performance Analysis")
-    st.caption("Select the categories and program batches you want to investigate. The narrative, comparisons and recommendations update to match your selection.")
+    """Compact category report using the original numbered analysis structure."""
+    st.markdown("## Category Analysis")
+    st.caption("Analyse category performance within selected Verticals, with optional program-level drill-down.")
 
-    @st.cache_data(show_spinner="Preparing category and program metrics...")
-    def _cached_programs(dataframe: pd.DataFrame):
-        return prepare_programs(dataframe)
-
-    programs, meta = _cached_programs(raw_df)
+    programs, meta = prepare_programs(raw_df)
     if programs.empty:
-        st.error("Cannot run the analysis. Required columns: program_code and tech_management.")
+        if meta.get("missing_columns"):
+            st.error("Category data is missing required columns: " + ", ".join(meta["missing_columns"]))
+        else:
+            st.warning("No category data is available.")
         return
 
-    # Hierarchical selection: Vertical is the former tech_management filter.
-    # Category is a separate filter sourced directly from the CSV `category` column.
-    verticals = sorted(programs.tech_management.dropna().astype(str).unique().tolist())
-    fys = sorted(programs.financial_year.dropna().astype(str).unique().tolist()) if "financial_year" in programs else []
+    def options(col, frame=None):
+        frame = programs if frame is None else frame
+        if col not in frame.columns:
+            return []
+        return sorted(frame[col].dropna().astype(str).unique().tolist())
 
-    def _reset_dependent_filters():
-        st.session_state["cat_v5_categories"] = []
-        st.session_state["cat_v5_programs"] = []
-
-    def _reset_program_filter():
-        st.session_state["cat_v5_programs"] = []
-
-    with st.container(border=True):
-        st.markdown("### Choose your analysis scope")
-        st.caption(
-            "First select one or more Verticals (tech_management). Then select one or more "
-            "Categories from the CSV category column. Analysis is limited to that combination."
-        )
-        v1, v2, v3 = st.columns(3)
-        with v1:
+    # Preserve the approved filter experience: Vertical > Category, with FY and optional programs.
+    with st.expander("Choose your analysis scope", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            verticals = options("tech_management")
             selected_verticals = st.multiselect(
-                "Vertical",
-                verticals,
-                default=[],
-                key="cat_v5_verticals",
-                help="This is the renamed Tech Management filter. You can select one or more Verticals.",
-                on_change=_reset_dependent_filters,
+                "Vertical", verticals, default=verticals, key="cat_v5_verticals"
             )
-
-        vertical_scope = (
-            programs[programs.tech_management.astype(str).isin(selected_verticals)].copy()
-            if selected_verticals else programs.iloc[0:0].copy()
-        )
-        category_options = (
-            sorted(vertical_scope.category.dropna().astype(str).unique().tolist())
-            if "category" in vertical_scope else []
-        )
-        with v2:
+        vertical_scope = programs[
+            programs.tech_management.astype(str).isin(selected_verticals)
+        ].copy() if selected_verticals else programs.iloc[0:0].copy()
+        with c2:
+            categories = options("category", vertical_scope)
             selected_categories = st.multiselect(
-                "Category",
-                category_options,
-                default=[],
+                "Category", categories, default=[],
                 key="cat_v5_categories",
-                help="Options come from the CSV `category` column and are limited to the selected Verticals.",
-                on_change=_reset_program_filter,
+                help="Category values are taken from the CSV category column and limited to selected Verticals.",
                 disabled=not selected_verticals,
             )
-        with v3:
-            selected_fys = (
-                st.multiselect("Financial year", fys, default=fys, key="cat_v5_fy")
-                if fys else []
-            )
+        with c3:
+            fys = options("financial_year", vertical_scope)
+            selected_fys = st.multiselect(
+                "Financial year", fys, default=fys, key="cat_v5_fy"
+            ) if fys else []
 
-        filtered = (
-            vertical_scope[vertical_scope.category.astype(str).isin(selected_categories)].copy()
-            if selected_categories else vertical_scope.iloc[0:0].copy()
-        )
+        filtered = vertical_scope[
+            vertical_scope.category.astype(str).isin(selected_categories)
+        ].copy() if selected_categories else vertical_scope.iloc[0:0].copy()
         if "financial_year" in filtered:
             filtered = filtered[filtered.financial_year.astype(str).isin(selected_fys)]
 
         available_codes = filtered.program_code.astype(str).drop_duplicates().tolist()
         name_rows = filtered.drop_duplicates("program_code")
-        name_map = (
-            dict(zip(name_rows.program_code.astype(str), name_rows.program_name.fillna("Program").astype(str)))
-            if "program_name" in name_rows else {}
-        )
-        with st.expander("Narrow to specific program batches (optional)", expanded=True):
+        name_map = dict(zip(
+            name_rows.program_code.astype(str),
+            name_rows.program_name.fillna("Program").astype(str)
+        )) if "program_name" in name_rows else {}
+        with st.expander("Narrow to specific program batches (optional)", expanded=False):
             selected_codes = st.multiselect(
-                "Programs / batches — leave empty to include every program in the selected Verticals and Categories",
+                "Programs / batches",
                 options=available_codes,
                 default=[],
                 key="cat_v5_programs",
                 format_func=lambda code: f"{name_map.get(code, 'Program')} | {code}",
+                help="Leave empty to include all program batches under the selected Vertical and Category filters.",
                 disabled=not selected_categories,
             )
-    if not selected_categories:
+
+    if not selected_verticals or not selected_categories:
         st.info("Select at least one Vertical and one Category to generate the analysis.")
         return
     if filtered.empty:
-        st.warning("No program batches match the selected Verticals, Categories and financial-year filters.")
+        st.warning("No program batches match the selected filters.")
         return
 
-    scope = filtered[filtered.program_code.astype(str).isin(selected_codes)].copy() if selected_codes else filtered.copy()
+    scope = filtered[
+        filtered.program_code.astype(str).isin(selected_codes)
+    ].copy() if selected_codes else filtered.copy()
     if scope.empty:
         st.warning("No program batches remain in this selection.")
         return
 
     built = _build_management_tables(scope)
     cat_table, batch_table = built["categories"], built["batches"]
-    selected_count = scope.program_code.nunique()
-    st.markdown(f"**Analysis scope:** {len(cat_table)} categories · {selected_count:,} program batches · {scope.leads.sum(min_count=1):,.0f} leads · {scope.enrollments.sum(min_count=1):,.0f} enrollments")
+    if cat_table.empty or batch_table.empty:
+        st.info("There is not enough program-level data for this selection.")
+        return
 
-    def pct(v):
-        return "not available" if pd.isna(v) else f"{v:.2%}"
+    def n(v, d=0):
+        return "N/A" if pd.isna(v) else f"{v:,.{d}f}"
+    def p(v):
+        return "N/A" if pd.isna(v) else f"{v:.2%}"
 
-    def num(v, decimals=0):
-        return "not available" if pd.isna(v) else f"{v:,.{decimals}f}"
+    st.markdown(
+        f"**Analysis scope:** {len(selected_verticals)} Vertical(s) · "
+        f"{len(selected_categories)} Category(s) · {scope.program_code.nunique():,} program batches"
+    )
 
-    def funnel_weakness(row, peers):
-        candidates = []
-        for metric, label in [("L2W", "lead-to-warm-lead"), ("L2A", "lead-to-application"), ("A2E", "application-to-enrollment")]:
-            own = row.get(metric, np.nan)
-            peer = peers[metric].median() if metric in peers and peers[metric].notna().any() else np.nan
-            if pd.notna(own) and pd.notna(peer):
-                candidates.append((peer - own, metric, label, own, peer))
-        return max(candidates, default=(np.nan, None, "", np.nan, np.nan), key=lambda x: x[0])
-
-    # 1. Overall comparison only across selected categories.
-    st.markdown("## 1. Selected category comparison")
+    # 1. Category comparison
+    st.markdown("### 1. Category comparison")
     if len(cat_table) > 1:
-        ranked = cat_table.sort_values("L2E", ascending=False, na_position="last")
-        best_conv = ranked.iloc[0]
         best_volume = cat_table.sort_values("enrollments", ascending=False).iloc[0]
-        st.write(
-            f"Among the selected categories, **{best_volume.category}** contributes the most enrollments "
-            f"({num(best_volume.enrollments)} from {num(best_volume.leads)} leads). "
-            f"**{best_conv.category}** has the highest overall lead-to-enrollment conversion "
-            f"({pct(best_conv.L2E)}). These are different measures: scale and conversion efficiency should not be treated as the same thing."
+        valid = cat_table.dropna(subset=["L2E"])
+        best_conversion = valid.sort_values("L2E", ascending=False).iloc[0] if not valid.empty else None
+        msg = (
+            f"**{best_volume.category}** contributes the highest enrollment volume "
+            f"({n(best_volume.enrollments)} enrollments from {n(best_volume.leads)} leads)."
         )
-        chart = cat_table.set_index("category")[["enrollments"]]
-        st.bar_chart(chart)
+        if best_conversion is not None:
+            msg += (
+                f" **{best_conversion.category}** has the strongest lead-to-enrollment conversion "
+                f"at {p(best_conversion.L2E)}."
+            )
+        st.write(msg)
     else:
-        only = cat_table.iloc[0]
-        st.write(f"You selected one category: **{only.category}**. The analysis below explains its funnel and compares the included program batches against one another.")
+        c = cat_table.iloc[0]
+        st.write(
+            f"**{c.category}** generated {n(c.leads)} leads and {n(c.enrollments)} enrollments "
+            f"with lead-to-enrollment conversion of {p(c.L2E)}."
+        )
+    comparison_cols = [x for x in [
+        "category", "programs", "leads", "warm_leads", "applications",
+        "enrollments", "L2W", "L2A", "A2E", "L2E", "gsv_cr"
+    ] if x in cat_table.columns]
+    comparison = cat_table[comparison_cols].copy()
+    for x in ["L2W", "L2A", "A2E", "L2E"]:
+        if x in comparison:
+            comparison[x] = comparison[x].map(p)
+    st.dataframe(comparison, use_container_width=True, hide_index=True)
+    if len(cat_table) > 1:
+        st.bar_chart(cat_table.set_index("category")[["enrollments"]])
 
-    summary_cols = [c for c in ["category", "tech_management", "programs", "leads", "warm_leads", "applications", "enrollments", "L2W", "L2A", "A2E", "L2E", "gsv_cr"] if c in cat_table]
-    compact = cat_table[summary_cols].copy()
-    for c in ["L2W", "L2A", "A2E", "L2E"]:
-        if c in compact:
-            compact[c] = compact[c].map(pct)
-    st.dataframe(compact, use_container_width=True, hide_index=True)
-
-    # 2. A concise narrative for every selected category.
-    st.markdown("## 2. Category-by-category findings")
-    for _, cat in cat_table.sort_values("enrollments", ascending=False).iterrows():
-        cat_batches = batch_table[batch_table.category == cat.category].copy()
-        eligible = cat_batches[cat_batches.leads >= 30]
-        st.markdown(f"### {cat.category}")
-        if cat.programs == 1:
-            st.write(f"This selection contains one program batch, generating {num(cat.leads)} leads and {num(cat.enrollments)} enrollments (L2E {pct(cat.L2E)}). There are no within-category peer batches in this filtered scope, so performance can be described but not ranked reliably.")
-            continue
-        med_l2e = eligible.L2E.median() if not eligible.empty else np.nan
-        top = eligible.sort_values("L2E", ascending=False).head(1)
-        low = eligible.sort_values("L2E", ascending=True).head(1)
-        finding = f"**{cat.programs:,} batches** generated **{num(cat.leads)} leads** and **{num(cat.enrollments)} enrollments**, giving a weighted L2E of **{pct(cat.L2E)}**."
-        if pd.notna(med_l2e):
-            finding += f" The median batch L2E is {pct(med_l2e)}, which helps distinguish the category's aggregate result from the typical batch experience."
-        if not top.empty and not low.empty and top.iloc[0].program_code != low.iloc[0].program_code:
-            finding += f" The strongest converting selected batch is **{top.iloc[0].program_code}** at {pct(top.iloc[0].L2E)}; the weakest eligible batch is **{low.iloc[0].program_code}** at {pct(low.iloc[0].L2E)}."
-        st.write(finding)
-        if not eligible.empty:
-            gap, metric, label, own, peer = funnel_weakness(eligible.sort_values("L2E").iloc[0], eligible)
-            if metric and gap > 0:
-                st.write(f"**What the funnel suggests:** the weakest eligible batch's largest gap versus the selected-category median is at {label} ({pct(own)} versus {pct(peer)}). Investigate this stage first rather than assuming that more leads alone will solve the problem.")
-        if len(eligible) < 4:
-            st.caption("Interpret batch ranking cautiously: fewer than four selected batches have at least 30 leads.")
-
-    # 3. Program-level analysis and peer comparison for exactly the selected programs.
-    st.markdown("## 3. Program / batch comparison")
-    if len(batch_table) == 1:
-        b = batch_table.iloc[0]
-        st.write(f"**{b.program_code}** ({b.get('program_name', 'Program')}) generated {num(b.leads)} leads, {num(b.warm_leads)} warm leads, {num(b.applications)} applications and {num(b.enrollments)} enrollments. Conversion: L2W {pct(b.L2W)}, L2A {pct(b.L2A)}, A2E {pct(b.A2E)}, and L2E {pct(b.L2E)}.")
-    else:
-        ranked_programs = batch_table.sort_values("L2E", ascending=False, na_position="last")
-        best = ranked_programs.iloc[0]
-        worst = ranked_programs.iloc[-1]
-        st.write(f"Across the **{len(batch_table):,} selected batches**, **{best.program_code}** has the highest L2E ({pct(best.L2E)}) and **{worst.program_code}** has the lowest ({pct(worst.L2E)}). Compare their funnel stages to see whether the gap emerges before application or during application-to-enrollment conversion.")
-        plot = batch_table.set_index("program_code")[["L2W", "L2A", "A2E", "L2E"]].copy()
-        st.bar_chart(plot)
-
-    evidence_cols = [c for c in ["program_code", "program_name", "tech_management", "financial_year", "leads", "warm_leads", "applications", "enrollments", "L2W", "L2A", "A2E", "L2E", "gsv_cr"] if c in batch_table]
-    evidence = batch_table[evidence_cols].copy()
-    for c in ["L2W", "L2A", "A2E", "L2E"]:
-        if c in evidence:
-            evidence[c] = evidence[c].map(pct)
-    st.caption("Selected program evidence (one row per program_code).")
-    st.dataframe(evidence, use_container_width=True, hide_index=True)
-
-    # 4. Explain each selected program against peers in its own category.
-    st.markdown("## 4. What is driving the differences? What to improve")
-    for _, b in batch_table.sort_values("L2E", ascending=True).iterrows():
-        peers = batch_table[(batch_table.category == b.category) & (batch_table.program_code != b.program_code) & (batch_table.leads >= 30)]
-        st.markdown(f"**{b.program_code} — {b.get('program_name', 'Program')}**")
-        if peers.empty or pd.isna(b.L2E):
-            st.write(f"This batch has L2E of {pct(b.L2E)}. There are not enough other selected peer batches with at least 30 leads to identify a reliable category-relative gap.")
-            continue
-        peer_l2e = (peers.enrollments.sum(min_count=1) / peers.leads.sum(min_count=1)) if peers.leads.sum(min_count=1) > 0 else np.nan
-        gap, metric, label, own, peer = funnel_weakness(b, peers)
-        direction = "above" if b.L2E >= peer_l2e else "below"
-        paragraph = f"It generated {num(b.leads)} leads and {num(b.enrollments)} enrollments, with L2E {pct(b.L2E)} — {direction} the other selected batches in {b.category} (peer weighted L2E {pct(peer_l2e)})."
-        if metric and gap > 0:
-            paragraph += f" Its largest identifiable funnel weakness is {label}: {pct(own)} versus {pct(peer)} for the selected peer median."
-            actions = {
-                "L2W": "Check lead validity, source mix, audience targeting, contactability and speed-to-lead.",
-                "L2A": "Review qualification criteria, lead-to-application journey, application friction and source-level lead quality.",
-                "A2E": "Review counselling follow-up, application completion, eligibility issues, fee objections and payment drop-offs.",
-            }
-            paragraph += f" **Recommended investigation:** {actions[metric]}"
+    # 2. Category performance diagnosis
+    st.markdown("### 2. Category performance diagnosis")
+    for _, c in cat_table.sort_values("enrollments", ascending=False).iterrows():
+        batches = batch_table[batch_table.category.astype(str) == str(c.category)]
+        eligible = batches[batches.leads >= 30]
+        st.markdown(f"**{c.category}**")
+        paragraph = (
+            f"This category has **{int(c.programs):,} program batches**, generating "
+            f"**{n(c.leads)} leads**, **{n(c.applications)} applications** and "
+            f"**{n(c.enrollments)} enrollments** (L2E: **{p(c.L2E)}**)."
+        )
+        if len(eligible) >= 2:
+            top = eligible.sort_values("L2E", ascending=False).iloc[0]
+            low = eligible.sort_values("L2E", ascending=True).iloc[0]
+            paragraph += (
+                f" The strongest eligible batch is **{top.program_code}** ({p(top.L2E)} L2E), "
+                f"while **{low.program_code}** is lowest ({p(low.L2E)})."
+            )
+            if pd.notna(top.L2E) and pd.notna(low.L2E):
+                paragraph += f" The conversion gap is {(top.L2E-low.L2E)*100:.2f} percentage points."
         else:
-            paragraph += " No clear underperforming funnel stage is visible against these selected peers; investigate program mix, offer, pricing and sales execution before prescribing a change."
+            paragraph += " There are too few batches with at least 30 leads for a reliable within-category ranking."
         st.write(paragraph)
 
-    # Commercial measures only when the underlying data supports them.
-    if "gsv_cr" in batch_table and batch_table.gsv_cr.notna().any():
-        st.markdown("## 5. Commercial outcome")
-        gsv_total = batch_table.gsv_cr.sum(min_count=1)
-        st.write(f"The selected batches report **{num(gsv_total, 2)} Cr GSV** in total. Compare GSV alongside enrollments: a category or program can lead on enrollment volume without leading on GSV per enrollment.")
-        if "GSV_per_enrollment" in batch_table:
-            gsv_view = batch_table[["program_code", "tech_management", "enrollments", "gsv_cr", "GSV_per_enrollment"]].copy()
-            st.dataframe(gsv_view, use_container_width=True, hide_index=True)
-    st.caption(f"Data basis: {meta.get('raw_rows', 0):,} source rows consolidated to {meta.get('programs', 0):,} program batches. Program batch identifier is program_code. Missing metrics are unavailable, not zero. Funnel gaps are diagnostic comparisons, not proof of cause.")
+    # 3. Funnel performance
+    st.markdown("### 3. Funnel performance")
+    total_leads = scope.leads.sum(min_count=1)
+    total_warm = scope.warm_leads.sum(min_count=1)
+    total_apps = scope.applications.sum(min_count=1)
+    total_enrol = scope.enrollments.sum(min_count=1)
+    funnel = pd.DataFrame([
+        {"Funnel stage": "Lead → Warm lead", "Volume": total_warm, "Conversion": total_warm / total_leads if pd.notna(total_leads) and total_leads > 0 else np.nan},
+        {"Funnel stage": "Lead → Application", "Volume": total_apps, "Conversion": total_apps / total_leads if pd.notna(total_leads) and total_leads > 0 else np.nan},
+        {"Funnel stage": "Application → Enrollment", "Volume": total_enrol, "Conversion": total_enrol / total_apps if pd.notna(total_apps) and total_apps > 0 else np.nan},
+        {"Funnel stage": "Lead → Enrollment", "Volume": total_enrol, "Conversion": total_enrol / total_leads if pd.notna(total_leads) and total_leads > 0 else np.nan},
+    ])
+    funnel["Conversion"] = funnel["Conversion"].map(p)
+    st.dataframe(funnel, use_container_width=True, hide_index=True)
 
-    # Scope the conversational agent to precisely the same selected program set.
-    selected_raw = raw_df[raw_df.program_code.astype(str).isin(scope.program_code.astype(str))].copy()
-    _render_category_chat(st, selected_raw, scope, {
-        "findings": [], "tables": {"selected_category_summary": cat_table, "selected_programs": batch_table},
-        "programs": scope, "meta": meta,
-    })
+    # 4. Program drill-down
+    st.markdown("### 4. Program / batch comparison")
+    if len(batch_table) > 1:
+        valid = batch_table.dropna(subset=["L2E"])
+        if not valid.empty:
+            best = valid.sort_values("L2E", ascending=False).iloc[0]
+            worst = valid.sort_values("L2E", ascending=True).iloc[0]
+            st.write(
+                f"Across **{len(batch_table):,} selected batches**, **{best.program_code}** "
+                f"has the highest L2E ({p(best.L2E)}), while **{worst.program_code}** "
+                f"has the lowest ({p(worst.L2E)})."
+            )
+    else:
+        b = batch_table.iloc[0]
+        st.write(
+            f"**{b.program_code}** generated {n(b.leads)} leads, {n(b.warm_leads)} warm leads, "
+            f"{n(b.applications)} applications and {n(b.enrollments)} enrollments "
+            f"(L2E: {p(b.L2E)})."
+        )
+    detail_cols = [x for x in [
+        "program_code", "program_name", "category", "financial_year", "leads",
+        "warm_leads", "applications", "enrollments", "L2W", "L2A", "A2E", "L2E", "gsv_cr"
+    ] if x in batch_table.columns]
+    detail = batch_table[detail_cols].copy()
+    for x in ["L2W", "L2A", "A2E", "L2E"]:
+        if x in detail:
+            detail[x] = detail[x].map(p)
+    st.dataframe(detail, use_container_width=True, hide_index=True)
+
+    # 5. What to improve
+    st.markdown("### 5. Improvement opportunities")
+    diagnostics = built.get("diagnostics", pd.DataFrame())
+    shown = 0
+    if not diagnostics.empty:
+        selected_diagnostics = diagnostics[
+            diagnostics.program_code.astype(str).isin(batch_table.program_code.astype(str))
+        ].sort_values("estimated_enrollment_scenario", ascending=False)
+        for _, d in selected_diagnostics.head(5).iterrows():
+            st.write(
+                f"- **{d.program_code}** ({d.category}): largest identified funnel gap is "
+                f"{d.largest_funnel_gap or 'not clear'}. Current stage conversion is "
+                f"{p(d.batch_stage_rate)} versus {p(d.top_quartile_stage_rate)} for the "
+                f"category's top-quartile peer benchmark. Estimated enrollment opportunity: "
+                f"{n(d.estimated_enrollment_scenario)} if the historical benchmark were reached. "
+                f"**Next step:** {d.recommended_investigation}"
+            )
+            shown += 1
+    if not shown:
+        st.write(
+            "No reliable underperforming-batch opportunity was identified in this selection. "
+            "Use the funnel comparison above to decide which stage warrants investigation."
+        )
+
+    # 6. Commercial outcomes and data caveats
+    st.markdown("### 6. Commercial outcomes")
+    if "gsv_cr" in batch_table and batch_table.gsv_cr.notna().any():
+        gsv = batch_table.gsv_cr.sum(min_count=1)
+        st.write(
+            f"The selected program batches generated **{n(gsv, 2)} Cr GSV** across "
+            f"**{n(total_enrol)} enrollments**."
+        )
+        commercial_cols = [x for x in ["category", "gsv_cr", "enrollments", "GSV_per_enrollment", "spends", "CAC"] if x in cat_table]
+        if commercial_cols:
+            st.dataframe(cat_table[commercial_cols], use_container_width=True, hide_index=True)
+        if "spends" in scope:
+            coverage = scope.spends.notna().mean()
+            st.caption(f"Spend is available for {coverage:.1%} of selected program batches; interpret CPL/CAC only with this coverage limitation.")
+    else:
+        st.write("GSV is not available for the selected program batches.")
+
+    result = {
+        "categories": cat_table.to_dict(orient="records"),
+        "batches": batch_table.to_dict(orient="records"),
+        "diagnostics": diagnostics.to_dict(orient="records") if not diagnostics.empty else [],
+        "scope": {
+            "verticals": selected_verticals, "categories": selected_categories,
+            "financial_years": selected_fys, "program_codes": scope.program_code.astype(str).tolist(),
+        },
+    }
+    _render_category_chat(st, raw_df, scope, result)
+
+
 def _category_chat_context(raw: pd.DataFrame, programs: pd.DataFrame, result: dict) -> str:
     """Build auditable context for category chat: source schema, analysis and records."""
     parts = [
