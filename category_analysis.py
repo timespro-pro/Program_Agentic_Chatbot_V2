@@ -490,9 +490,12 @@ def _build_management_tables(programs: pd.DataFrame) -> dict:
         p["GSV_per_enrollment"] = _safe_ratio(p.gsv_cr, p.enrollments)
 
     cat_rows = []
-    for cat, g in p.groupby("tech_management", dropna=False):
+    # Category is the analytical level; tech_management is the parent Vertical.
+    # The page filters to one vertical before this function is called.
+    for cat, g in p.groupby("category", dropna=False):
         row = {
-            "tech_management": str(cat), "programs": g.program_code.nunique(),
+            "category": str(cat), "tech_management": str(g.tech_management.iloc[0]),
+            "programs": g.program_code.nunique(),
             "leads": g.leads.sum(min_count=1), "warm_leads": g.warm_leads.sum(min_count=1) if "warm_leads" in g else np.nan,
             "applications": g.applications.sum(min_count=1), "enrollments": g.enrollments.sum(min_count=1),
             "gsv_cr": g.gsv_cr.sum(min_count=1), "spends": g.spends.sum(min_count=1) if "spends" in g else np.nan,
@@ -539,10 +542,10 @@ def _build_management_tables(programs: pd.DataFrame) -> dict:
         batches["leads"] = np.nan
 
     # Category-relative batch performance: require enough lead volume to reduce noise.
-    batches["category_l2e"] = batches.tech_management.map(categories.set_index("tech_management")["L2E"])
+    batches["category_l2e"] = batches.category.map(categories.set_index("category")["L2E"])
     batches["l2e_gap_pp"] = (batches.L2E - batches.category_l2e) * 100
     batches["batch_status"] = "Near category average"
-    for cat, idx in batches.groupby("tech_management").groups.items():
+    for cat, idx in batches.groupby("category").groups.items():
         g = batches.loc[idx]
         eligible = g[g.leads >= 30]
         if len(eligible) < 4:
@@ -557,10 +560,10 @@ def _build_management_tables(programs: pd.DataFrame) -> dict:
     # Explain stage-level gap against the category's top quartile and estimate scenarios.
     diagnostics = []
     for _, b in batches.iterrows():
-        cat = b.tech_management
+        cat = b.category
         if b.get("batch_status") != "Underperforming":
             continue
-        peer = batches[(batches.tech_management == cat) & (batches.leads >= 30)]
+        peer = batches[(batches.category == cat) & (batches.leads >= 30)]
         if len(peer) < 4 or pd.isna(b.leads) or b.leads < 30:
             continue
         stage_q = {m: peer[m].quantile(.75) for m in ["L2W", "L2A", "A2E", "L2E"] if m in peer}
@@ -582,7 +585,7 @@ def _build_management_tables(programs: pd.DataFrame) -> dict:
             action = "Review the full funnel and compare against the strongest matched category peers."
         diagnostics.append({
             "program_code": b.program_code, "program_name": b.get("program_name"),
-            "tech_management": cat, "leads": b.leads, "enrollments": b.get("enrollments"),
+            "tech_management": b.tech_management, "category": cat, "leads": b.leads, "enrollments": b.get("enrollments"),
             "batch_L2E": b.get("L2E"), "category_L2E": b.get("category_l2e"),
             "top_quartile_L2E": l2e_q, "L2E_gap_pp_to_top_quartile": (l2e_q-b.L2E)*100 if pd.notna(l2e_q) and pd.notna(b.L2E) else np.nan,
             "estimated_enrollment_scenario": scenario, "largest_funnel_gap": driver,
@@ -594,84 +597,8 @@ def _build_management_tables(programs: pd.DataFrame) -> dict:
     return {"programs": p, "categories": categories, "batches": batches, "diagnostics": diagnostics}
 
 
-
-def _category_panel_header(st, title: str, status: str = "MIXED", basis: str = "") -> None:
-    """Render a Program-Analysis-style section heading and verdict inside a bordered panel."""
-    color = {"GOOD": "#16c784", "BAD": "#ff4b55", "MIXED": "#f0a43a"}.get(status, "#f0a43a")
-    st.markdown(
-        f"""
-        <div class="cat-analysis-heading">{title.upper()}</div>
-        <div class="cat-analysis-status"><b>Performance Status:</b>
-        <span style="color:{color};font-size:1.05rem">●</span>
-        <b>{status}</b></div>
-        {f'<div class="cat-analysis-basis"><i>Assessment basis:</i> {basis}</div>' if basis else ''}
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _category_panel_style(st) -> None:
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid rgba(150, 177, 235, .42) !important;
-            border-radius: 17px !important;
-            background: rgba(8, 31, 91, .30) !important;
-            padding: 15px 18px !important;
-            margin: 10px 0 18px 0 !important;
-            box-shadow: 0 8px 24px rgba(0, 10, 40, .10) !important;
-        }
-        .cat-analysis-heading { color: inherit; font-size: .91rem; font-weight: 900;
-            letter-spacing: .045em; text-transform: uppercase; margin-bottom: 13px; }
-        .cat-analysis-status { font-size: .90rem; margin-bottom: 9px; }
-        .cat-analysis-basis { font-size: .84rem; opacity: .90; margin: 0 0 12px 0; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _category_panel_header(st, title: str, status: str = "MIXED", basis: str = "") -> None:
-    """Render a Program-Analysis-style section heading and verdict inside a bordered panel."""
-    color = {"GOOD": "#16c784", "BAD": "#ff4b55", "MIXED": "#f0a43a"}.get(status, "#f0a43a")
-    st.markdown(
-        f"""
-        <div class="cat-analysis-heading">{title.upper()}</div>
-        <div class="cat-analysis-status"><b>Performance Status:</b>
-        <span style="color:{color};font-size:1.05rem">●</span>
-        <b>{status}</b></div>
-        {f'<div class="cat-analysis-basis"><i>Assessment basis:</i> {basis}</div>' if basis else ''}
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _category_panel_style(st) -> None:
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid rgba(150, 177, 235, .42) !important;
-            border-radius: 17px !important;
-            background: rgba(8, 31, 91, .30) !important;
-            padding: 15px 18px !important;
-            margin: 10px 0 18px 0 !important;
-            box-shadow: 0 8px 24px rgba(0, 10, 40, .10) !important;
-        }
-        .cat-analysis-heading { color: inherit; font-size: .91rem; font-weight: 900;
-            letter-spacing: .045em; text-transform: uppercase; margin-bottom: 13px; }
-        .cat-analysis-status { font-size: .90rem; margin-bottom: 9px; }
-        .cat-analysis-basis { font-size: .84rem; opacity: .90; margin: 0 0 12px 0; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
 def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
     """Interactive category + program investigation driven by the user's filters."""
-    _category_panel_style(st)
-    _category_panel_style(st)
     st.markdown("## Category & Program Performance Analysis")
     st.caption("Select the categories and program batches you want to investigate. The narrative, comparisons and recommendations update to match your selection.")
 
@@ -684,36 +611,52 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         st.error("Cannot run the analysis. Required columns: program_code and tech_management.")
         return
 
-    # Selection controls: category selection first, then programs within those categories.
-    cats = sorted(programs.tech_management.dropna().astype(str).unique().tolist())
+    # Hierarchical selection: Vertical first, then Category values belonging to it.
+    verticals = sorted(programs.tech_management.dropna().astype(str).unique().tolist())
     fys = sorted(programs.financial_year.dropna().astype(str).unique().tolist()) if "financial_year" in programs else []
-    new_repeat = sorted(programs.New_Repeat.dropna().astype(str).unique().tolist()) if "New_Repeat" in programs else []
+    def _reset_dependent_filters():
+        st.session_state["cat_v4_categories"] = []
+        st.session_state["cat_v4_programs"] = []
+
+    def _reset_program_filter():
+        st.session_state["cat_v4_programs"] = []
+
     with st.container(border=True):
         st.markdown("### Choose your analysis scope")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            selected_cats = st.multiselect("Categories (Tech Management)", cats, default=cats, key="cat_v3_categories")
-        with c2:
-            selected_fys = st.multiselect("Financial year", fys, default=fys, key="cat_v3_fy") if fys else []
-        with c3:
-            selected_nr = st.multiselect("New / Repeat", new_repeat, default=new_repeat, key="cat_v3_new_repeat") if new_repeat else []
+        st.caption("Select a Vertical first. Categories are then restricted to that Vertical; the analysis runs only for the selected categories.")
+        v1, v2 = st.columns(2)
+        with v1:
+            selected_vertical = st.selectbox("Vertical", verticals, index=0 if verticals else None,
+                                             key="cat_v4_vertical", on_change=_reset_dependent_filters)
+        vertical_scope = programs[programs.tech_management.astype(str).eq(str(selected_vertical))].copy()
+        category_options = sorted(vertical_scope.category.dropna().astype(str).unique().tolist()) if "category" in vertical_scope else []
+        with v2:
+            selected_categories = st.multiselect(
+                "Category (select one or more)", category_options, default=[], key="cat_v4_categories",
+                help="Choose at least one category. Only programs under the selected Vertical and Categories will be analysed.",
+                on_change=_reset_program_filter,
+            )
+        f1, f2 = st.columns(2)
+        with f1:
+            selected_fys = st.multiselect("Financial year", fys, default=fys, key="cat_v4_fy") if fys else []
 
-        filtered = programs[programs.tech_management.astype(str).isin(selected_cats)].copy()
+        filtered = vertical_scope[vertical_scope.category.astype(str).isin(selected_categories)].copy() if selected_categories else vertical_scope.iloc[0:0].copy()
         if "financial_year" in filtered:
             filtered = filtered[filtered.financial_year.astype(str).isin(selected_fys)]
-        if "New_Repeat" in filtered:
-            filtered = filtered[filtered.New_Repeat.astype(str).isin(selected_nr)]
         available_codes = filtered.program_code.astype(str).drop_duplicates().tolist()
         name_rows = filtered.drop_duplicates("program_code")
         name_map = dict(zip(name_rows.program_code.astype(str), name_rows.program_name.fillna("Program").astype(str))) if "program_name" in name_rows else {}
         with st.expander("Narrow to specific program batches (optional)", expanded=True):
             selected_codes = st.multiselect(
                 "Programs / batches — leave empty to include every program in the selected categories",
-                options=available_codes, default=[], key="cat_v3_programs",
+                options=available_codes, default=[], key="cat_v4_programs",
                 format_func=lambda code: f"{name_map.get(code, 'Program')} | {code}"
             )
+    if not selected_categories:
+        st.info("Select at least one Category under the chosen Vertical to generate the analysis.")
+        return
     if filtered.empty:
-        st.warning("No program batches match the selected filters. Update your category or period selection.")
+        st.warning("No program batches match the selected Vertical, Category and financial-year filters.")
         return
 
     scope = filtered[filtered.program_code.astype(str).isin(selected_codes)].copy() if selected_codes else filtered.copy()
@@ -741,39 +684,37 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
                 candidates.append((peer - own, metric, label, own, peer))
         return max(candidates, default=(np.nan, None, "", np.nan, np.nan), key=lambda x: x[0])
 
-    with st.container(border=True):
-        _category_panel_header(st, '1. Selected category comparison', "MIXED", 'Based on the selected categories, their weighted funnel conversion and batch-level distribution.')
     # 1. Overall comparison only across selected categories.
+    st.markdown("## 1. Selected category comparison")
     if len(cat_table) > 1:
         ranked = cat_table.sort_values("L2E", ascending=False, na_position="last")
         best_conv = ranked.iloc[0]
         best_volume = cat_table.sort_values("enrollments", ascending=False).iloc[0]
         st.write(
-            f"Among the selected categories, **{best_volume.tech_management}** contributes the most enrollments "
+            f"Among the selected categories, **{best_volume.category}** contributes the most enrollments "
             f"({num(best_volume.enrollments)} from {num(best_volume.leads)} leads). "
-            f"**{best_conv.tech_management}** has the highest overall lead-to-enrollment conversion "
+            f"**{best_conv.category}** has the highest overall lead-to-enrollment conversion "
             f"({pct(best_conv.L2E)}). These are different measures: scale and conversion efficiency should not be treated as the same thing."
         )
-        chart = cat_table.set_index("tech_management")[["enrollments"]]
+        chart = cat_table.set_index("category")[["enrollments"]]
         st.bar_chart(chart)
     else:
         only = cat_table.iloc[0]
-        st.write(f"You selected one category: **{only.tech_management}**. The analysis below explains its funnel and compares the included program batches against one another.")
+        st.write(f"You selected one category: **{only.category}**. The analysis below explains its funnel and compares the included program batches against one another.")
 
-    summary_cols = [c for c in ["tech_management", "programs", "leads", "warm_leads", "applications", "enrollments", "L2W", "L2A", "A2E", "L2E", "gsv_cr"] if c in cat_table]
+    summary_cols = [c for c in ["category", "tech_management", "programs", "leads", "warm_leads", "applications", "enrollments", "L2W", "L2A", "A2E", "L2E", "gsv_cr"] if c in cat_table]
     compact = cat_table[summary_cols].copy()
     for c in ["L2W", "L2A", "A2E", "L2E"]:
         if c in compact:
             compact[c] = compact[c].map(pct)
     st.dataframe(compact, use_container_width=True, hide_index=True)
 
-    with st.container(border=True):
-        _category_panel_header(st, '2. Category-by-category findings', "MIXED", 'Each category is assessed against its own selected program-batch distribution.')
     # 2. A concise narrative for every selected category.
+    st.markdown("## 2. Category-by-category findings")
     for _, cat in cat_table.sort_values("enrollments", ascending=False).iterrows():
-        cat_batches = batch_table[batch_table.tech_management == cat.tech_management].copy()
+        cat_batches = batch_table[batch_table.category == cat.category].copy()
         eligible = cat_batches[cat_batches.leads >= 30]
-        st.markdown(f"### {cat.tech_management}")
+        st.markdown(f"### {cat.category}")
         if cat.programs == 1:
             st.write(f"This selection contains one program batch, generating {num(cat.leads)} leads and {num(cat.enrollments)} enrollments (L2E {pct(cat.L2E)}). There are no within-category peer batches in this filtered scope, so performance can be described but not ranked reliably.")
             continue
@@ -793,9 +734,8 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         if len(eligible) < 4:
             st.caption("Interpret batch ranking cautiously: fewer than four selected batches have at least 30 leads.")
 
-    with st.container(border=True):
-        _category_panel_header(st, '3. Program / batch comparison', "MIXED", 'Based on the selected program batches and their lead-to-enrollment conversion.')
     # 3. Program-level analysis and peer comparison for exactly the selected programs.
+    st.markdown("## 3. Program / batch comparison")
     if len(batch_table) == 1:
         b = batch_table.iloc[0]
         st.write(f"**{b.program_code}** ({b.get('program_name', 'Program')}) generated {num(b.leads)} leads, {num(b.warm_leads)} warm leads, {num(b.applications)} applications and {num(b.enrollments)} enrollments. Conversion: L2W {pct(b.L2W)}, L2A {pct(b.L2A)}, A2E {pct(b.A2E)}, and L2E {pct(b.L2E)}.")
@@ -815,11 +755,10 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
     st.caption("Selected program evidence (one row per program_code).")
     st.dataframe(evidence, use_container_width=True, hide_index=True)
 
-    with st.container(border=True):
-        _category_panel_header(st, '4. What is driving the differences? What to improve', "MIXED", 'Based on each selected program compared with other selected batches in the same category.')
     # 4. Explain each selected program against peers in its own category.
+    st.markdown("## 4. What is driving the differences? What to improve")
     for _, b in batch_table.sort_values("L2E", ascending=True).iterrows():
-        peers = batch_table[(batch_table.tech_management == b.tech_management) & (batch_table.program_code != b.program_code) & (batch_table.leads >= 30)]
+        peers = batch_table[(batch_table.category == b.category) & (batch_table.program_code != b.program_code) & (batch_table.leads >= 30)]
         st.markdown(f"**{b.program_code} — {b.get('program_name', 'Program')}**")
         if peers.empty or pd.isna(b.L2E):
             st.write(f"This batch has L2E of {pct(b.L2E)}. There are not enough other selected peer batches with at least 30 leads to identify a reliable category-relative gap.")
@@ -827,7 +766,7 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         peer_l2e = (peers.enrollments.sum(min_count=1) / peers.leads.sum(min_count=1)) if peers.leads.sum(min_count=1) > 0 else np.nan
         gap, metric, label, own, peer = funnel_weakness(b, peers)
         direction = "above" if b.L2E >= peer_l2e else "below"
-        paragraph = f"It generated {num(b.leads)} leads and {num(b.enrollments)} enrollments, with L2E {pct(b.L2E)} — {direction} the other selected batches in {b.tech_management} (peer weighted L2E {pct(peer_l2e)})."
+        paragraph = f"It generated {num(b.leads)} leads and {num(b.enrollments)} enrollments, with L2E {pct(b.L2E)} — {direction} the other selected batches in {b.category} (peer weighted L2E {pct(peer_l2e)})."
         if metric and gap > 0:
             paragraph += f" Its largest identifiable funnel weakness is {label}: {pct(own)} versus {pct(peer)} for the selected peer median."
             actions = {
@@ -840,10 +779,9 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
             paragraph += " No clear underperforming funnel stage is visible against these selected peers; investigate program mix, offer, pricing and sales execution before prescribing a change."
         st.write(paragraph)
 
-    with st.container(border=True):
-        _category_panel_header(st, '5. Commercial outcome', "MIXED", 'Based on reported GSV and enrollment values where data is available.')
     # Commercial measures only when the underlying data supports them.
     if "gsv_cr" in batch_table and batch_table.gsv_cr.notna().any():
+        st.markdown("## 5. Commercial outcome")
         gsv_total = batch_table.gsv_cr.sum(min_count=1)
         st.write(f"The selected batches report **{num(gsv_total, 2)} Cr GSV** in total. Compare GSV alongside enrollments: a category or program can lead on enrollment volume without leading on GSV per enrollment.")
         if "GSV_per_enrollment" in batch_table:
@@ -863,7 +801,7 @@ def _category_chat_context(raw: pd.DataFrame, programs: pd.DataFrame, result: di
         "CATEGORY INTELLIGENCE CHAT CONTEXT",
         f"Source rows loaded: {len(raw):,}",
         f"Unique programs after source-row consolidation: {programs.program_code.nunique():,}",
-        "Primary grouping: tech_management. Program-level metrics are summed across source_created rows; program attributes are retained once.",
+        "Primary grouping: Vertical (tech_management) then Category. Program-level metrics are summed across source_created rows; program attributes are retained once.",
         "Raw source columns: " + ", ".join(map(str, raw.columns)),
         "IMPORTANT: Missing values are unknown/unavailable, not zero. Findings are observational, not causal.",
     ]
