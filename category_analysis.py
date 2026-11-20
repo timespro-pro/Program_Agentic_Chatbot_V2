@@ -611,52 +611,86 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         st.error("Cannot run the analysis. Required columns: program_code and tech_management.")
         return
 
-    # Hierarchical selection: Vertical first, then Category values belonging to it.
+    # Hierarchical selection: Vertical is the former tech_management filter.
+    # Category is a separate filter sourced directly from the CSV `category` column.
     verticals = sorted(programs.tech_management.dropna().astype(str).unique().tolist())
     fys = sorted(programs.financial_year.dropna().astype(str).unique().tolist()) if "financial_year" in programs else []
+
     def _reset_dependent_filters():
-        st.session_state["cat_v4_categories"] = []
-        st.session_state["cat_v4_programs"] = []
+        st.session_state["cat_v5_categories"] = []
+        st.session_state["cat_v5_programs"] = []
 
     def _reset_program_filter():
-        st.session_state["cat_v4_programs"] = []
+        st.session_state["cat_v5_programs"] = []
 
     with st.container(border=True):
         st.markdown("### Choose your analysis scope")
-        st.caption("Select a Vertical first. Categories are then restricted to that Vertical; the analysis runs only for the selected categories.")
-        v1, v2 = st.columns(2)
+        st.caption(
+            "First select one or more Verticals (tech_management). Then select one or more "
+            "Categories from the CSV category column. Analysis is limited to that combination."
+        )
+        v1, v2, v3 = st.columns(3)
         with v1:
-            selected_vertical = st.selectbox("Vertical", verticals, index=0 if verticals else None,
-                                             key="cat_v4_vertical", on_change=_reset_dependent_filters)
-        vertical_scope = programs[programs.tech_management.astype(str).eq(str(selected_vertical))].copy()
-        category_options = sorted(vertical_scope.category.dropna().astype(str).unique().tolist()) if "category" in vertical_scope else []
+            selected_verticals = st.multiselect(
+                "Vertical",
+                verticals,
+                default=[],
+                key="cat_v5_verticals",
+                help="This is the renamed Tech Management filter. You can select one or more Verticals.",
+                on_change=_reset_dependent_filters,
+            )
+
+        vertical_scope = (
+            programs[programs.tech_management.astype(str).isin(selected_verticals)].copy()
+            if selected_verticals else programs.iloc[0:0].copy()
+        )
+        category_options = (
+            sorted(vertical_scope.category.dropna().astype(str).unique().tolist())
+            if "category" in vertical_scope else []
+        )
         with v2:
             selected_categories = st.multiselect(
-                "Category (select one or more)", category_options, default=[], key="cat_v4_categories",
-                help="Choose at least one category. Only programs under the selected Vertical and Categories will be analysed.",
+                "Category",
+                category_options,
+                default=[],
+                key="cat_v5_categories",
+                help="Options come from the CSV `category` column and are limited to the selected Verticals.",
                 on_change=_reset_program_filter,
+                disabled=not selected_verticals,
             )
-        f1, f2 = st.columns(2)
-        with f1:
-            selected_fys = st.multiselect("Financial year", fys, default=fys, key="cat_v4_fy") if fys else []
+        with v3:
+            selected_fys = (
+                st.multiselect("Financial year", fys, default=fys, key="cat_v5_fy")
+                if fys else []
+            )
 
-        filtered = vertical_scope[vertical_scope.category.astype(str).isin(selected_categories)].copy() if selected_categories else vertical_scope.iloc[0:0].copy()
+        filtered = (
+            vertical_scope[vertical_scope.category.astype(str).isin(selected_categories)].copy()
+            if selected_categories else vertical_scope.iloc[0:0].copy()
+        )
         if "financial_year" in filtered:
             filtered = filtered[filtered.financial_year.astype(str).isin(selected_fys)]
+
         available_codes = filtered.program_code.astype(str).drop_duplicates().tolist()
         name_rows = filtered.drop_duplicates("program_code")
-        name_map = dict(zip(name_rows.program_code.astype(str), name_rows.program_name.fillna("Program").astype(str))) if "program_name" in name_rows else {}
+        name_map = (
+            dict(zip(name_rows.program_code.astype(str), name_rows.program_name.fillna("Program").astype(str)))
+            if "program_name" in name_rows else {}
+        )
         with st.expander("Narrow to specific program batches (optional)", expanded=True):
             selected_codes = st.multiselect(
-                "Programs / batches — leave empty to include every program in the selected categories",
-                options=available_codes, default=[], key="cat_v4_programs",
-                format_func=lambda code: f"{name_map.get(code, 'Program')} | {code}"
+                "Programs / batches — leave empty to include every program in the selected Verticals and Categories",
+                options=available_codes,
+                default=[],
+                key="cat_v5_programs",
+                format_func=lambda code: f"{name_map.get(code, 'Program')} | {code}",
+                disabled=not selected_categories,
             )
     if not selected_categories:
-        st.info("Select at least one Category under the chosen Vertical to generate the analysis.")
+        st.info("Select at least one Vertical and one Category to generate the analysis.")
         return
     if filtered.empty:
-        st.warning("No program batches match the selected Vertical, Category and financial-year filters.")
+        st.warning("No program batches match the selected Verticals, Categories and financial-year filters.")
         return
 
     scope = filtered[filtered.program_code.astype(str).isin(selected_codes)].copy() if selected_codes else filtered.copy()
