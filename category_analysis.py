@@ -727,7 +727,7 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
     st.dataframe(comparison, use_container_width=True, hide_index=True)
 
     # Interactive category contribution pie chart.
-    # Uses Streamlit's built-in Vega-Lite renderer; no matplotlib dependency required.
+    # A self-contained SVG avoids optional plotting packages and supports real slice labels.
     metric_options = [
         ("Leads", "leads"),
         ("Warm Leads", "warm_leads"),
@@ -745,7 +745,7 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         chart_title_col, chart_metric_col = st.columns([4, 1])
         with chart_title_col:
             st.markdown("**Selected category contribution**")
-            st.caption("Category names and percentage contributions are displayed beside the pie.")
+            st.caption("3D-style category shares, with category names and percentages outside the slices.")
         with chart_metric_col:
             selected_metric_label = st.selectbox(
                 "Metric",
@@ -764,71 +764,98 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
 
         if len(pie_data) > 0 and total_metric_value > 0:
             pie_data["share"] = pie_data["value"] / total_metric_value
-            pie_data["share_label"] = pie_data["share"].map(lambda x: f"{x:.1%}")
-            pie_data["category_label"] = pie_data.apply(
-                lambda r: f"{r['category']} — {r['share_label']}", axis=1
-            )
 
-            pie_spec = {
-                "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-                "background": None,
-                "width": "container",
-                "height": 360,
-                "layer": [
-                    {
-                        "mark": {
-                            "type": "arc",
-                            "outerRadius": 132,
-                            "stroke": "#ffffff",
-                            "strokeWidth": 1.2,
-                            "opacity": 1,
-                        },
-                        "encoding": {
-                            "theta": {
-                                "field": "value",
-                                "type": "quantitative",
-                                "stack": True,
-                            },
-                            "color": {
-                                "field": "category_label",
-                                "type": "nominal",
-                                "title": "Category contribution",
-                                "scale": {"scheme": "tableau20"},
-                                "legend": {
-                                    "orient": "right",
-                                    "direction": "vertical",
-                                    "labelLimit": 260,
-                                    "titleColor": "#ffffff",
-                                    "labelColor": "#ffffff",
-                                    "titleFontSize": 13,
-                                    "labelFontSize": 12,
-                                    "symbolSize": 110,
-                                },
-                            },
-                            "tooltip": [
-                                {"field": "category", "type": "nominal", "title": "Category"},
-                                {"field": "value", "type": "quantitative", "title": selected_metric_label, "format": ",.2f"},
-                                {"field": "share", "type": "quantitative", "title": "Contribution", "format": ".2%"},
-                            ],
-                        },
-                    },
-                ],
-                "config": {
-                    "view": {"stroke": None},
-                    "background": None,
-                    "legend": {
-                        "padding": 8,
-                        "titleFont": "Arial",
-                        "labelFont": "Arial",
-                    },
-                },
-            }
-            # Vega-Lite receives the data frame through Streamlit's chart API.
-            st.vega_lite_chart(
-                pie_data[["category", "value", "share"]],
-                pie_spec,
-                use_container_width=True,
-            )
+            # SVG canvas: transparent background; elliptical top surface gives perspective.
+            width, height = 1120, 500
+            cx, cy = 430, 220
+            rx, ry = 185, 145
+            depth = 28
+            palette = [
+                "#4E79A7", "#F28E2B", "#59A14F", "#E15759", "#B07AA1",
+                "#76B7B2", "#EDC948", "#FF9DA7", "#9C755F", "#BAB0AC",
+                "#86BCB6", "#D37295", "#8CD17D", "#B6992D", "#499894",
+                "#D4A6C8", "#79706E", "#FABFD2", "#A0CBE8", "#FFBE7D",
+            ]
+
+            def polar_point(angle, y_offset=0):
+                return (
+                    cx + rx * math.cos(angle),
+                    cy + y_offset + ry * math.sin(angle),
+                )
+
+            def wedge_path(a0, a1, y_offset=0):
+                x0, y0 = polar_point(a0, y_offset)
+                x1, y1 = polar_point(a1, y_offset)
+                large = 1 if (a1 - a0) > math.pi else 0
+                return (
+                    f"M {cx:.2f} {cy + y_offset:.2f} "
+                    f"L {x0:.2f} {y0:.2f} "
+                    f"A {rx} {ry} 0 {large} 1 {x1:.2f} {y1:.2f} Z"
+                )
+
+            def shade(hex_color, factor=0.55):
+                h = hex_color.lstrip("#")
+                rgb = [int(h[i:i+2], 16) for i in (0, 2, 4)]
+                return "#" + "".join(f"{int(v*factor):02x}" for v in rgb)
+
+            svg_parts = [
+                f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                'width="100%" role="img" aria-label="3D-style category contribution pie chart">',
+                '<style>text{font-family:Arial,sans-serif}.cat-label{fill:#ffffff;font-size:15px;font-weight:600}.cat-value{fill:#dceaff;font-size:14px;font-weight:500}</style>',
+            ]
+
+            # Build slice geometry and draw the extruded lower faces first.
+            angle = -math.pi / 2
+            slices = []
+            rows = pie_data.reset_index(drop=True)
+            for i, row in rows.iterrows():
+                share = float(row["share"])
+                next_angle = angle + 2 * math.pi * share
+                color = palette[i % len(palette)]
+                slices.append((row, angle, next_angle, color))
+                angle = next_angle
+
+            # Lower offset layer; the top surface covers its upper half, leaving a visible side wall.
+            for row, a0, a1, color in slices:
+                svg_parts.append(
+                    f'<path d="{wedge_path(a0, a1, depth)}" fill="{shade(color)}" '
+                    'stroke="#17264a" stroke-width="1"/>'
+                )
+
+            # Top pie surface.
+            for row, a0, a1, color in slices:
+                svg_parts.append(
+                    f'<path d="{wedge_path(a0, a1, 0)}" fill="{color}" '
+                    'stroke="#ffffff" stroke-width="1.6"/>'
+                )
+
+            # Outside labels with leader lines; alternate left/right based on slice midpoint.
+            for i, (row, a0, a1, color) in enumerate(slices):
+                mid = (a0 + a1) / 2
+                x1, y1 = polar_point(mid, 0)
+                x2, y2 = polar_point(mid, 24)
+                right_side = math.cos(mid) >= 0
+                x3 = x2 + (68 if right_side else -68)
+                y3 = y2 + (i % 3 - 1) * 9
+                anchor = "start" if right_side else "end"
+                tx = x3 + (7 if right_side else -7)
+                category_text = html.escape(str(row["category"]))
+                share_text = f'{float(row["share"]):.1%}'
+                svg_parts.append(
+                    f'<polyline points="{x1:.1f},{y1:.1f} {x2:.1f},{y2:.1f} {x3:.1f},{y3:.1f}" '
+                    f'fill="none" stroke="{color}" stroke-width="1.8"/>'
+                )
+                svg_parts.append(
+                    f'<text class="cat-label" x="{tx:.1f}" y="{y3-3:.1f}" text-anchor="{anchor}">'
+                    f'{category_text}</text>'
+                )
+                svg_parts.append(
+                    f'<text class="cat-value" x="{tx:.1f}" y="{y3+17:.1f}" text-anchor="{anchor}">'
+                    f'{share_text}</text>'
+                )
+
+            svg_parts.append("</svg>")
+            st.markdown("".join(svg_parts), unsafe_allow_html=True)
             st.caption(
                 f"Showing {selected_metric_label.lower()} contribution across "
                 f"{len(pie_data)} selected categories. Total: {total_metric_value:,.2f}."
