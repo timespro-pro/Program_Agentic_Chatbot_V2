@@ -725,8 +725,82 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         if x in comparison:
             comparison[x] = comparison[x].map(p)
     st.dataframe(comparison, use_container_width=True, hide_index=True)
-    if len(cat_table) > 1:
-        st.bar_chart(cat_table.set_index("category")[["enrollments"]])
+
+    # Interactive category contribution pie chart.
+    metric_options = [
+        ("Leads", "leads"),
+        ("Warm Leads", "warm_leads"),
+        ("Applications", "applications"),
+        ("Enrollments", "enrollments"),
+        ("GSV", "gsv_cr"),
+        ("Spend", "spends"),
+        ("Paid Leads", "paid_leads"),
+        ("Paid Enrollments", "paid_enrollments"),
+        ("Paid GSV", "paid_gsv_cr"),
+        ("Paid Spend", "paid_spends"),
+    ]
+    available_metrics = [(label, col) for label, col in metric_options if col in cat_table.columns]
+    if available_metrics:
+        chart_title_col, chart_metric_col = st.columns([4, 1])
+        with chart_title_col:
+            st.markdown("**Selected category contribution**")
+            st.caption("Each slice represents that category's percentage of the selected metric total.")
+        with chart_metric_col:
+            selected_metric_label = st.selectbox(
+                "Metric",
+                [label for label, _ in available_metrics],
+                index=next((i for i, (label, _) in enumerate(available_metrics) if label == "Enrollments"), 0),
+                key="cat_contribution_metric",
+                label_visibility="collapsed",
+            )
+        selected_metric_col = dict(available_metrics)[selected_metric_label]
+        pie_data = cat_table[["category", selected_metric_col]].copy()
+        pie_data[selected_metric_col] = pd.to_numeric(pie_data[selected_metric_col], errors="coerce")
+        pie_data = pie_data.dropna(subset=[selected_metric_col])
+        pie_data = pie_data[pie_data[selected_metric_col] > 0].copy()
+        pie_data = pie_data.rename(columns={selected_metric_col: "value"})
+        total_metric_value = pie_data["value"].sum()
+        if len(pie_data) > 0 and total_metric_value > 0:
+            pie_data["share"] = pie_data["value"] / total_metric_value
+            pie_spec = {
+                "width": "container",
+                "height": 360,
+                "layer": [
+                    {
+                        "mark": {"type": "arc", "outerRadius": 145, "stroke": "#ffffff", "strokeWidth": 1},
+                        "encoding": {
+                            "theta": {"field": "value", "type": "quantitative", "stack": True},
+                            "color": {
+                                "field": "category", "type": "nominal",
+                                "title": "Category",
+                                "scale": {"scheme": "tableau20"},
+                            },
+                            "tooltip": [
+                                {"field": "category", "type": "nominal", "title": "Category"},
+                                {"field": "value", "type": "quantitative", "title": selected_metric_label, "format": ",.2f"},
+                                {"field": "share", "type": "quantitative", "title": "Contribution", "format": ".2%"},
+                            ],
+                        },
+                    },
+                    {
+                        "mark": {"type": "text", "radius": 105, "fontSize": 12, "fontWeight": "bold", "fill": "#ffffff"},
+                        "encoding": {
+                            "theta": {"field": "value", "type": "quantitative", "stack": True},
+                            "text": {"field": "share", "type": "quantitative", "format": ".1%"},
+                        },
+                    },
+                ],
+                "view": {"stroke": None},
+            }
+            st.vega_lite_chart(pie_data, pie_spec, use_container_width=True)
+            st.caption(
+                f"Showing {selected_metric_label.lower()} contribution across "
+                f"{len(pie_data)} selected categories. Total: {total_metric_value:,.2f}."
+            )
+        else:
+            st.info(f"No positive {selected_metric_label.lower()} values are available for the selected categories.")
+    else:
+        st.info("No supported numeric contribution metrics are available for the selected categories.")
 
     # 2. Category performance diagnosis
     st.markdown("### 2. Category performance diagnosis")
