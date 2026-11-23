@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import math
+import html
 from typing import Any
 
 import numpy as np
