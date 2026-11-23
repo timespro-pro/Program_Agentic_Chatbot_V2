@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import math
 import html
+import re
 from typing import Any
 
 import numpy as np
@@ -906,34 +907,214 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
     funnel["Conversion"] = funnel["Conversion"].map(p)
     st.dataframe(funnel, use_container_width=True, hide_index=True)
 
-    # 4. Program drill-down
-    st.markdown("### 4. Program / batch comparison")
-    if len(batch_table) > 1:
-        valid = batch_table.dropna(subset=["L2E"])
-        if not valid.empty:
-            best = valid.sort_values("L2E", ascending=False).iloc[0]
-            worst = valid.sort_values("L2E", ascending=True).iloc[0]
-            st.write(
-                f"Across **{len(batch_table):,} selected batches**, **{best.program_code}** "
-                f"has the highest L2E ({p(best.L2E)}), while **{worst.program_code}** "
-                f"has the lowest ({p(worst.L2E)})."
-            )
-    else:
-        b = batch_table.iloc[0]
-        st.write(
-            f"**{b.program_code}** generated {n(b.leads)} leads, {n(b.warm_leads)} warm leads, "
-            f"{n(b.applications)} applications and {n(b.enrollments)} enrollments "
-            f"(L2E: {p(b.L2E)})."
+    # 4. Program-level year-over-year comparison (consolidated across batch codes).
+    st.markdown("### 4. Program performance — year-over-year comparison")
+    st.caption(
+        "Batch-code suffixes are removed from program names and all corresponding batches "
+        "are consolidated into one program within each financial year."
+    )
+
+    # The selector mirrors the category contribution chart and allows the user
+    # to switch the comparison metric without changing the selected scope.
+    yoy_metric_options = [
+        ("Leads", "leads"),
+        ("Warm Leads", "warm_leads"),
+        ("Applications", "applications"),
+        ("Enrollments", "enrollments"),
+        ("Lead → Warm Lead Conversion", "L2W"),
+        ("Lead → Application Conversion", "L2A"),
+        ("Warm Lead → Application Conversion", "W2A"),
+        ("Application → Enrollment Conversion", "A2E"),
+        ("Lead → Enrollment Conversion", "L2E"),
+        ("GSV", "gsv_cr"),
+        ("Spend", "spends"),
+        ("Cost per Lead", "CPL"),
+        ("Cost per Acquisition", "CAC"),
+        ("GSV per Enrollment", "GSV_per_enrollment"),
+    ]
+    yoy_available = [
+        (label, col) for label, col in yoy_metric_options
+        if col in batch_table.columns or col in {"CPL", "CAC", "GSV_per_enrollment"}
+    ]
+    yoy_metric_col1, yoy_metric_col2 = st.columns([3, 1])
+    with yoy_metric_col1:
+        st.write("Select a metric to compare across financial years.")
+    with yoy_metric_col2:
+        yoy_metric_label = st.selectbox(
+            "Comparison metric",
+            [label for label, _ in yoy_available],
+            index=next(
+                (i for i, (label, _) in enumerate(yoy_available) if label == "Enrollments"),
+                0,
+            ),
+            key="cat_program_yoy_metric",
+            label_visibility="collapsed",
         )
-    detail_cols = [x for x in [
-        "program_code", "program_name", "category", "financial_year", "leads",
-        "warm_leads", "applications", "enrollments", "L2W", "L2A", "A2E", "L2E", "gsv_cr"
-    ] if x in batch_table.columns]
-    detail = batch_table[detail_cols].copy()
-    for x in ["L2W", "L2A", "A2E", "L2E"]:
-        if x in detail:
-            detail[x] = detail[x].map(p)
-    st.dataframe(detail, use_container_width=True, hide_index=True)
+    yoy_metric = dict(yoy_available)[yoy_metric_label]
+
+    # Derive a stable program identity from program_name, not program_code.
+    # Names such as "..._01", "..._02", etc. are the same program with different batches.
+    program_yoy_source = scope.copy()
+    if "program_name" in program_yoy_source:
+        program_yoy_source["_program_identity"] = (
+            program_yoy_source["program_name"]
+            .fillna(program_yoy_source["program_code"].astype(str))
+            .astype(str).str.strip()
+            .str.replace(r"[_-]\d+$", "", regex=True)
+        )
+    else:
+        program_yoy_source["_program_identity"] = (
+            program_yoy_source["program_code"].astype(str)
+            .str.replace(r"[_-]\d+$", "", regex=True)
+        )
+    program_yoy_source["_program_display"] = (
+        program_yoy_source["_program_identity"].str.replace("_", " ", regex=False)
+    )
+
+    # Aggregate all batch codes belonging to the same program in each FY.
+    yoy_group_cols = ["_program_identity", "_program_display", "category", "financial_year"]
+    additive_yoy_cols = [
+        c for c in ["leads", "warm_leads", "applications", "enrollments", "gsv_cr", "spends"]
+        if c in program_yoy_source.columns
+    ]
+    yoy_agg = {c: (lambda x: x.sum(min_count=1)) for c in additive_yoy_cols}
+    program_yoy = (
+        program_yoy_source.groupby(yoy_group_cols, dropna=False, as_index=False)
+        .agg(yoy_agg)
+    )
+    for numerator, denominator, rate_name in [
+        ("warm_leads", "leads", "L2W"),
+        ("applications", "leads", "L2A"),
+        ("applications", "warm_leads", "W2A"),
+        ("enrollments", "applications", "A2E"),
+        ("enrollments", "leads", "L2E"),
+    ]:
+        if numerator in program_yoy and denominator in program_yoy:
+            program_yoy[rate_name] = _safe_ratio(
+                program_yoy[numerator], program_yoy[denominator]
+            )
+    if {"spends", "leads"}.issubset(program_yoy.columns):
+        program_yoy["CPL"] = _safe_ratio(program_yoy["spends"], program_yoy["leads"])
+    if {"spends", "enrollments"}.issubset(program_yoy.columns):
+        program_yoy["CAC"] = _safe_ratio(program_yoy["spends"], program_yoy["enrollments"])
+    if {"gsv_cr", "enrollments"}.issubset(program_yoy.columns):
+        program_yoy["GSV_per_enrollment"] = _safe_ratio(
+            program_yoy["gsv_cr"], program_yoy["enrollments"]
+        )
+
+    # Sort fiscal years chronologically; display newest year first.
+    available_fys = program_yoy["financial_year"].dropna().astype(str).unique().tolist()
+    def _fy_sort_key(value):
+        match = re.search(r"(\d+)", str(value))
+        return int(match.group(1)) if match else -1
+    fy_order = sorted(available_fys, key=_fy_sort_key)
+    fy_desc = list(reversed(fy_order))
+
+    if not program_yoy.empty and yoy_metric in program_yoy.columns:
+        # Build one row per distinct program and retain the category as context.
+        output_rows = []
+        for (identity, display, category_name), group in program_yoy.groupby(
+            ["_program_identity", "_program_display", "category"], dropna=False
+        ):
+            fy_values = {
+                str(row["financial_year"]): row.get(yoy_metric, np.nan)
+                for _, row in group.iterrows()
+            }
+            row_out = {
+                "Program": display,
+                "Category": category_name,
+            }
+            for fy in fy_desc:
+                value = fy_values.get(fy, np.nan)
+                if yoy_metric in {"L2W", "L2A", "W2A", "A2E", "L2E"}:
+                    row_out[fy] = "N/A" if pd.isna(value) else f"{value:.2%}"
+                elif yoy_metric in {"CPL", "CAC"}:
+                    row_out[fy] = "N/A" if pd.isna(value) else f"₹{value:,.0f}"
+                elif yoy_metric == "GSV_per_enrollment":
+                    row_out[fy] = "N/A" if pd.isna(value) else f"{value:,.2f}"
+                else:
+                    row_out[fy] = "N/A" if pd.isna(value) else f"{value:,.0f}"
+
+            # Year-over-year deltas compare each year with the immediately preceding FY.
+            for idx in range(len(fy_desc) - 1):
+                newer, older = fy_desc[idx], fy_desc[idx + 1]
+                newer_value = fy_values.get(newer, np.nan)
+                older_value = fy_values.get(older, np.nan)
+                delta_key = f"{newer} vs {older}"
+                if pd.isna(newer_value) or pd.isna(older_value) or older_value == 0:
+                    row_out[delta_key] = "N/A"
+                else:
+                    pct_change = (newer_value - older_value) / abs(older_value) * 100
+                    pp_change = (newer_value - older_value) * 100
+                    # A decrease is favourable for acquisition-cost metrics.
+                    favourable = pct_change <= 0 if yoy_metric in {"CPL", "CAC"} else pct_change >= 0
+                    arrow = "🟢 ↑" if favourable else "🔴 ↓"
+                    if yoy_metric in {"L2W", "L2A", "W2A", "A2E", "L2E"}:
+                        row_out[delta_key] = f"{arrow} {pct_change:+.1f}% ({pp_change:+.2f} pp)"
+                    else:
+                        row_out[delta_key] = f"{arrow} {pct_change:+.1f}%"
+            output_rows.append(row_out)
+
+        yoy_display = pd.DataFrame(output_rows)
+        # Sort by the latest available year for the selected metric.
+        latest_fy = fy_desc[0] if fy_desc else None
+        if latest_fy and latest_fy in yoy_display.columns:
+            sort_values = program_yoy[program_yoy.financial_year.astype(str) == latest_fy][
+                ["_program_display", "category", yoy_metric]
+            ].copy()
+            sort_values = sort_values.rename(columns={
+                "_program_display": "Program", yoy_metric: "_latest_metric"
+            })
+            yoy_display = yoy_display.merge(
+                sort_values, on=["Program", "Category"], how="left"
+            ).sort_values("_latest_metric", ascending=False, na_position="last")
+            yoy_display = yoy_display.drop(columns=["_latest_metric"])
+
+        st.write(
+            f"Comparing **{yoy_display['Program'].nunique():,} distinct programs** "
+            f"across **{len(fy_desc)} financial years** using **{yoy_metric_label}**. "
+            "Repeated batch codes are consolidated under the same program name."
+        )
+        st.dataframe(yoy_display, use_container_width=True, hide_index=True)
+
+        # Compact interpretation based on the latest FY and the preceding FY.
+        if len(fy_desc) >= 2:
+            latest_fy, previous_fy = fy_desc[0], fy_desc[1]
+            latest_values = program_yoy[program_yoy.financial_year.astype(str) == latest_fy]
+            previous_values = program_yoy[program_yoy.financial_year.astype(str) == previous_fy]
+            latest_valid = latest_values.dropna(subset=[yoy_metric]) if yoy_metric in latest_values else pd.DataFrame()
+            if not latest_valid.empty:
+                best_row = latest_valid.sort_values(yoy_metric, ascending=(yoy_metric in {"CPL", "CAC"})).iloc[0]
+                st.write(
+                    f"**Latest-year leader ({latest_fy}):** {best_row['_program_display']} "
+                    f"({best_row[yoy_metric]:,.2f}{'%' if yoy_metric in {'L2W','L2A','W2A','A2E','L2E'} else ''})."
+                )
+            comparable = latest_values.merge(
+                previous_values,
+                on=["_program_identity", "_program_display", "category"],
+                suffixes=("_new", "_old"),
+            )
+            metric_new, metric_old = f"{yoy_metric}_new", f"{yoy_metric}_old"
+            if metric_new in comparable and metric_old in comparable:
+                comparable = comparable.dropna(subset=[metric_new, metric_old])
+                comparable = comparable[comparable[metric_old] != 0]
+                if not comparable.empty:
+                    comparable["_change"] = (
+                        (comparable[metric_new] - comparable[metric_old])
+                        / comparable[metric_old].abs()
+                    )
+                    improved = (
+                        comparable["_change"] < 0
+                        if yoy_metric in {"CPL", "CAC"}
+                        else comparable["_change"] > 0
+                    )
+                    st.caption(
+                        f"{int(improved.sum())} of {len(comparable)} comparable programs improved "
+                        f"from {previous_fy} to {latest_fy} on {yoy_metric_label}. "
+                        "For CPL/CAC, a decrease is treated as improvement; for other metrics, an increase is treated as improvement."
+                    )
+    else:
+        st.info("No data is available for the selected metric and financial-year scope.")
 
     # 5. Good vs. weak program comparison — same-category peer benchmark.
     st.markdown("### 5. What good-performing programs do differently")
