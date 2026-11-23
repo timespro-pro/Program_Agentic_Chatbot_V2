@@ -744,7 +744,7 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         chart_title_col, chart_metric_col = st.columns([4, 1])
         with chart_title_col:
             st.markdown("**Selected category contribution**")
-            st.caption("Each slice represents that category's percentage of the selected metric total.")
+            st.caption("Category names and percentage contributions are displayed outside the pie.")
         with chart_metric_col:
             selected_metric_label = st.selectbox(
                 "Metric",
@@ -760,47 +760,73 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         pie_data = pie_data[pie_data[selected_metric_col] > 0].copy()
         pie_data = pie_data.rename(columns={selected_metric_col: "value"})
         total_metric_value = pie_data["value"].sum()
+
         if len(pie_data) > 0 and total_metric_value > 0:
+            import matplotlib.pyplot as plt
+            from matplotlib.colors import to_rgb
+
             pie_data["share"] = pie_data["value"] / total_metric_value
-            pie_spec = {
-                "width": "container",
-                "height": 360,
-                "layer": [
-                    {
-                        "mark": {"type": "arc", "outerRadius": 145, "stroke": "#ffffff", "strokeWidth": 1},
-                        "encoding": {
-                            "theta": {"field": "value", "type": "quantitative", "stack": True},
-                            "color": {
-                                "field": "category", "type": "nominal",
-                                "title": "Category",
-                                "scale": {"scheme": "tableau20"},
-                            },
-                            "tooltip": [
-                                {"field": "category", "type": "nominal", "title": "Category"},
-                                {"field": "value", "type": "quantitative", "title": selected_metric_label, "format": ",.2f"},
-                                {"field": "share", "type": "quantitative", "title": "Contribution", "format": ".2%"},
-                            ],
-                        },
-                    },
-                    {
-                        "mark": {"type": "text", "radius": 105, "fontSize": 12, "fontWeight": "bold", "fill": "#ffffff"},
-                        "encoding": {
-                            "theta": {"field": "value", "type": "quantitative", "stack": True},
-                            "text": {"field": "share", "type": "quantitative", "format": ".1%"},
-                        },
-                    },
-                ],
-                "view": {"stroke": None},
-            }
-            st.vega_lite_chart(pie_data, pie_spec, use_container_width=True)
+            values = pie_data["value"].astype(float).tolist()
+            categories_for_pie = pie_data["category"].astype(str).tolist()
+            labels = [
+                f"{category}\n{share:.1%}"
+                for category, share in zip(categories_for_pie, pie_data["share"])
+            ]
+
+            # Matplotlib's transparent figure removes the opaque chart rectangle.
+            # A darker, slightly offset lower pie creates a subtle 3D/extruded illusion.
+            fig, ax = plt.subplots(figsize=(12, 5.8), dpi=120)
+            fig.patch.set_alpha(0)
+            ax.set_facecolor("none")
+            fig.subplots_adjust(left=0.12, right=0.88, top=0.96, bottom=0.06)
+
+            cmap = plt.get_cmap("tab20")
+            top_colors = [cmap(i % 20) for i in range(len(values))]
+            lower_colors = []
+            for color in top_colors:
+                rgb = to_rgb(color)
+                lower_colors.append(tuple(channel * 0.52 for channel in rgb))
+
+            # Lower layer: subtle depth; top layer: clean category slices.
+            ax.pie(
+                values,
+                radius=0.88,
+                center=(0, -0.075),
+                colors=lower_colors,
+                startangle=90,
+                counterclock=False,
+                wedgeprops={"linewidth": 0, "edgecolor": "none"},
+            )
+            ax.pie(
+                values,
+                labels=labels,
+                radius=0.88,
+                center=(0, 0.015),
+                colors=top_colors,
+                startangle=90,
+                counterclock=False,
+                labeldistance=1.24,
+                shadow=True,
+                textprops={"color": "#ffffff", "fontsize": 9, "fontweight": "semibold"},
+                wedgeprops={"linewidth": 1.2, "edgecolor": "#ffffff"},
+            )
+            ax.set_aspect("equal")
+            ax.set_xlim(-1.85, 1.85)
+            ax.set_ylim(-1.18, 1.18)
+            ax.axis("off")
+            st.pyplot(fig, use_container_width=True, transparent=True)
+            plt.close(fig)
+
             st.caption(
                 f"Showing {selected_metric_label.lower()} contribution across "
-                f"{len(pie_data)} selected categories. Total: {total_metric_value:,.2f}."
+                f"{len(pie_data)} selected categories. Total: {total_metric_value:,.2f}. "
+                "The depth is a visual 3D-style effect, not a 3D data axis."
             )
         else:
             st.info(f"No positive {selected_metric_label.lower()} values are available for the selected categories.")
     else:
         st.info("No supported numeric contribution metrics are available for the selected categories.")
+
 
     # 2. Category performance diagnosis
     st.markdown("### 2. Category performance diagnosis")
