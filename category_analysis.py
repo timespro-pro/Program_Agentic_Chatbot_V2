@@ -1063,7 +1063,9 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
                 ["_program_display", "category", yoy_metric]
             ].copy()
             sort_values = sort_values.rename(columns={
-                "_program_display": "Program", yoy_metric: "_latest_metric"
+                "_program_display": "Program",
+                "category": "Category",
+                yoy_metric: "_latest_metric",
             })
             yoy_display = yoy_display.merge(
                 sort_values, on=["Program", "Category"], how="left"
