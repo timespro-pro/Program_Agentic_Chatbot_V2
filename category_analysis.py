@@ -747,7 +747,7 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
         chart_title_col, chart_metric_col = st.columns([4, 1])
         with chart_title_col:
             st.markdown("**Selected category contribution**")
-            st.caption("3D-style category shares, with category names and percentages outside the slices.")
+            st.caption("Each selected category is shown as a share of the entire business (100%) for the selected financial year(s). Unselected categories are grouped as Other categories.")
         with chart_metric_col:
             selected_metric_label = st.selectbox(
                 "Metric",
@@ -757,14 +757,42 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
                 label_visibility="collapsed",
             )
         selected_metric_col = dict(available_metrics)[selected_metric_label]
+        # Denominator = the entire business for the selected financial year(s).
+        # Intentionally ignore Vertical, Category and optional Program filters here.
+        # This makes selected category percentages a share of total business (100%),
+        # rather than forcing the selected categories themselves to add up to 100%.
+        overall_scope = programs.copy()
+        if "financial_year" in overall_scope.columns:
+            overall_scope = overall_scope[
+                overall_scope["financial_year"].astype(str).isin(selected_fys)
+            ].copy()
+        overall_categories = _build_management_tables(overall_scope)["categories"]
+
         pie_data = cat_table[["category", selected_metric_col]].copy()
         pie_data[selected_metric_col] = pd.to_numeric(pie_data[selected_metric_col], errors="coerce")
         pie_data = pie_data.dropna(subset=[selected_metric_col])
         pie_data = pie_data[pie_data[selected_metric_col] > 0].copy()
         pie_data = pie_data.rename(columns={selected_metric_col: "value"})
-        total_metric_value = pie_data["value"].sum()
+        pie_data = pie_data.groupby("category", as_index=False)["value"].sum()
 
-        if len(pie_data) > 0 and total_metric_value > 0:
+        overall_metric_total = (
+            pd.to_numeric(overall_categories[selected_metric_col], errors="coerce").sum(min_count=1)
+            if selected_metric_col in overall_categories.columns and not overall_categories.empty
+            else np.nan
+        )
+        selected_metric_total = pie_data["value"].sum(min_count=1)
+        if pd.notna(overall_metric_total) and overall_metric_total > 0 and pd.notna(selected_metric_total):
+            other_value = max(float(overall_metric_total) - float(selected_metric_total), 0.0)
+            if other_value > max(float(overall_metric_total), 1.0) * 1e-10:
+                pie_data = pd.concat([
+                    pie_data,
+                    pd.DataFrame([{"category": "Other categories", "value": other_value}])
+                ], ignore_index=True)
+            total_metric_value = float(overall_metric_total)
+        else:
+            total_metric_value = np.nan
+
+        if len(pie_data) > 0 and pd.notna(total_metric_value) and total_metric_value > 0:
             pie_data["share"] = pie_data["value"] / total_metric_value
 
             # SVG canvas: transparent background; elliptical top surface gives perspective.
@@ -859,11 +887,12 @@ def render_category_analysis(st, raw_df: pd.DataFrame) -> None:
             svg_parts.append("</svg>")
             st.markdown("".join(svg_parts), unsafe_allow_html=True)
             st.caption(
-                f"Showing {selected_metric_label.lower()} contribution across "
-                f"{len(pie_data)} selected categories. Total: {total_metric_value:,.2f}."
+                f"Each percentage is calculated against total business {selected_metric_label.lower()} "
+                f"({total_metric_value:,.2f}) across all Verticals and Categories for the selected financial year(s). "
+                f"Selected category share: {selected_metric_total:,.2f}."
             )
         else:
-            st.info(f"No positive {selected_metric_label.lower()} values are available for the selected categories.")
+            st.info(f"No positive overall {selected_metric_label.lower()} total is available for the selected financial year(s).")
     else:
         st.info("No supported numeric contribution metrics are available for the selected categories.")
 
